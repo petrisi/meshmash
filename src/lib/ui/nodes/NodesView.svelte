@@ -85,6 +85,20 @@
     return list
   })
 
+  // While the pointer is over the table, keep row order stable so live updates don't move
+  // rows under the cursor. The snapshot is tied to the current sort/filter.
+  let hovering = $state(false)
+  let snapshot: { key: string; ids: string[] } | null = null
+  const viewKey = $derived(`${sortKey}|${sortAsc}|${filter}|${query}`)
+  const shown = $derived.by(() => {
+    if (!hovering || !snapshot || snapshot.key !== viewKey) {
+      snapshot = { key: viewKey, ids: rows.map((n) => n.id) }
+      return rows
+    }
+    const byId = new Map(rows.map((n) => [n.id, n]))
+    return snapshot.ids.flatMap((id) => byId.get(id) ?? [])
+  })
+
   function sortBy(k: SortKey) {
     if (sortKey === k) sortAsc = !sortAsc
     else {
@@ -98,7 +112,7 @@
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
     e.preventDefault()
-    const all = selfNode ? [selfNode, ...rows] : rows
+    const all = selfNode ? [selfNode, ...shown] : shown
     const i = all.findIndex((n) => n.id === app.selectedNode)
     const next = all[Math.min(all.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))]
     if (next) {
@@ -119,10 +133,17 @@
           </button>
         {/each}
       </div>
-      <span class="faint total">{rows.length} shown</span>
+      <span class="faint total">{hovering ? 'order paused · ' : ''}{rows.length} shown</span>
     </div>
 
-    <div class="tablewrap" role="grid" tabindex="0" onkeydown={onKey}>
+    <div
+      class="tablewrap"
+      role="grid"
+      tabindex="0"
+      onkeydown={onKey}
+      onmouseenter={() => (hovering = true)}
+      onmouseleave={() => (hovering = false)}
+    >
       <table>
         <thead>
           <tr>
@@ -135,11 +156,12 @@
           </tr>
         </thead>
         <tbody>
-          {#each selfNode ? [selfNode, ...rows] : rows as n (n.id)}
+          {#each selfNode ? [selfNode, ...shown] : shown as n (n.id)}
             {@const isSelf = n.id === app.selfId}
             <tr
               id="node-{n.id}"
               class:self={isSelf}
+              class:ignored={n.ignored}
               class:sel={app.selectedNode === n.id}
               onclick={() => (app.selectedNode = n.id)}
               ondblclick={() => !isSelf && app.openDm(n.id)}
@@ -149,6 +171,7 @@
                 {#key n.lastHeard}<span class="ln" class:heard-flash={!isSelf && Date.now() - (n.lastHeard ?? 0) < 1500}>{n.longName}</span>{/key}
                 {#if isSelf}<span class="you">YOU</span>{/if}
                 {#if n.favorite}<span class="star">★</span>{/if}
+                {#if n.ignored}<span class="ign">IGN</span>{/if}
                 <span class="mono faint id">{n.id}</span>
               </td>
               <td class="muted">{KIND_LABEL[n.kind]}</td>
@@ -291,6 +314,15 @@
     border-radius: 3px;
     background: var(--accent);
     color: var(--accent-ink);
+  }
+  tr.ignored td {
+    opacity: 0.45;
+  }
+  .ign {
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--danger);
   }
   .star {
     margin-left: 4px;

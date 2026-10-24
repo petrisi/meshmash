@@ -29,6 +29,11 @@ class AppState {
   lastRead = $state<Record<string, number>>({})
   traceroutes = $state<Record<string, TracerouteResult>>({})
   busy = $state<Record<string, string>>({})
+  /**
+   * Per channel: node id → last time heard on that channel. Meshtastic counts any packet
+   * (every packet carries a channel); MeshCore only channel messages.
+   */
+  channelHeard = $state<Record<string, Record<string, number>>>({})
 
   view = $state<View>('messages')
   activeThread = $state<ThreadKey | null>(null)
@@ -71,6 +76,11 @@ class AppState {
     const cutoff = Date.now() - 3 * 3_600_000
     this.lastRead = Object.fromEntries([...this.byThread.keys()].map((k) => [k, cutoff]))
     this.traceroutes = {}
+    this.channelHeard = {}
+    for (const m of s.messages)
+      if (m.thread.startsWith('ch:') && m.from !== this.selfId) this.#heardOn(m.thread, m.from, m.ts)
+    if (protocol === 'meshtastic')
+      for (const n of s.nodes) if (n.id !== this.selfId && n.lastHeard) this.#heardOn('ch:0', n.id, n.lastHeard)
     this.view = 'messages'
     this.activeThread = 'ch:0'
     this.selectedNode = null
@@ -87,13 +97,20 @@ class AppState {
     this.#timers = []
   }
 
+  #heardOn(thread: string, nodeId: string, ts: number) {
+    const ch = (this.channelHeard[thread] ??= {})
+    if ((ch[nodeId] ?? 0) < ts) ch[nodeId] = ts
+  }
+
   /** Demo: simulate mesh traffic — nodes being heard and occasional messages. */
   #scheduleLive() {
     const t = setTimeout(() => {
       if (!this.session) return
       const peers = this.nodes.filter((n) => n.id !== this.selfId)
       const n = peers[Math.floor(Math.random() * peers.length)]
+      if (n.ignored) return this.#scheduleLive()
       n.lastHeard = Date.now()
+      if (this.protocol === 'meshtastic') this.#heardOn('ch:0', n.id, n.lastHeard)
       if (n.hops === 0) n.snr = Math.round((Math.random() * 22 - 15) * 4) / 4
       if (Math.random() < 0.3 && (this.protocol === 'meshtastic' || n.kind === 'chat')) {
         const ch = this.channels[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * this.channels.length)]
@@ -113,6 +130,7 @@ class AppState {
           snr: Math.round((Math.random() * 20 - 14) * 4) / 4,
           rssi: isMt ? Math.round(-128 + Math.random() * 55) : undefined,
         })
+        this.#heardOn(`ch:${ch.index}`, n.id, Date.now())
         if (this.activeThread === `ch:${ch.index}` && this.view === 'messages') this.markRead(`ch:${ch.index}`)
       }
       this.#scheduleLive()
@@ -172,7 +190,8 @@ class AppState {
 
     // Demo: radio accepts, then rebroadcasts trickle in during the window.
     later(500, (m) => (m.status = 'sent'))
-    const repeats = Math.floor(Math.random() * 5)
+    // Meshtastic reports only the first rebroadcast (implicit ACK), so at most 1.
+    const repeats = Math.floor(Math.random() * (this.protocol === 'meshtastic' ? 2 : 5))
     for (let i = 0; i < repeats; i++)
       later(1200 + Math.random() * (REPEAT_WINDOW_MS - 3000), (m) => (m.repeats = (m.repeats ?? 0) + 1))
     if (isDm && Math.random() < 0.8) later(2500 + Math.random() * 8000, (m) => (m.status = 'acked'))
@@ -195,6 +214,13 @@ class AppState {
         return
       case 'send-nodeinfo':
         this.pushLog('Node info broadcast')
+        return
+      case 'send-position':
+        this.pushLog('Position broadcast')
+        return
+      case 'ignore':
+        node.ignored = !node.ignored
+        this.pushLog(`${node.ignored ? 'Ignored' : 'Unignored'} ${node.longName}`)
         return
       case 'dm':
         this.openDm(nodeId)

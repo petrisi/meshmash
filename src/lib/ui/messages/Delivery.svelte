@@ -1,33 +1,36 @@
 <script lang="ts">
   import { REPEAT_OK } from '../../model/capabilities'
   import type { Message } from '../../model/types'
+  import { app } from '../../state.svelte'
 
   let { m }: { m: Message } = $props()
 
   const repeats = $derived(m.repeats ?? 0)
   const isDm = $derived(m.thread.startsWith('dm:'))
+  // Meshtastic reports only that someone relayed (implicit ACK), not how many.
+  const counts = $derived(app.protocol !== 'meshtastic')
 
   // One state per message; DM recipient ACK outranks repeat counting.
   const state = $derived.by(() => {
     if (m.status === 'failed') return 'failed'
     if (isDm && m.status === 'acked') return 'delivered'
+    if (repeats >= REPEAT_OK && (m.settled || !counts)) return 'ok'
     if (!m.settled) return repeats ? 'counting' : 'waiting'
-    if (repeats >= REPEAT_OK) return 'ok'
     return repeats ? 'weak' : 'none'
   })
 
   const TITLE: Record<string, string> = {
     waiting: 'Sent, listening for rebroadcasts',
     counting: 'Rebroadcasts heard so far',
-    ok: 'Rebroadcast by multiple nodes',
-    weak: 'Rebroadcast by one node',
+    ok: 'Rebroadcast heard',
+    weak: 'Too few rebroadcasts heard',
     none: 'No rebroadcast heard',
     delivered: 'Delivered (recipient acknowledged)',
     failed: 'Not delivered',
   }
 </script>
 
-<span class="d {state}" title="{TITLE[state]}{repeats ? ` · ${repeats} heard` : ''}">
+<span class="d {state}" title="{TITLE[state]}{counts && repeats ? ` · ${repeats} heard` : ''}">
   {#if state === 'waiting' || state === 'counting'}
     <i class="spin"></i>
   {:else if state === 'delivered'}
@@ -37,7 +40,7 @@
   {:else}
     <b>✕</b>
   {/if}
-  <span class="n">{repeats || ''}</span>
+  <span class="n">{counts && repeats ? repeats : ''}</span>
 </span>
 
 <style>

@@ -4,6 +4,7 @@
   import type { MeshNode } from '../../model/types'
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
+  import MiniMap, { type MapPoint } from '../MiniMap.svelte'
 
   let { node, compact = false }: { node: MeshNode; compact?: boolean } = $props()
 
@@ -14,6 +15,12 @@
   const dist = $derived(isSelf ? undefined : distanceKm(self?.position, node.position))
   const tr = $derived(app.traceroutes[node.id])
   const busy = $derived(app.busy[node.id])
+  const mapPoints = $derived.by(() => {
+    if (!node.position) return []
+    const pts: MapPoint[] = [{ pos: node.position, label: node.shortName }]
+    if (!isSelf && self?.position) pts.unshift({ pos: self.position, label: 'You', self: true })
+    return pts
+  })
   const name = (id: string) => (id === app.selfId ? 'You' : (app.nodeById.get(id)?.longName ?? id))
 </script>
 
@@ -24,6 +31,7 @@
       <div class="ln">
         {node.longName}
         {#if node.favorite}<span class="star" title="Favorite">★</span>{/if}
+        {#if node.ignored}<span class="ign">IGNORED</span>{/if}
       </div>
       <div class="mono muted">{node.id}{isSelf ? ' · this radio' : ''}</div>
     </div>
@@ -88,7 +96,6 @@
       {/if}
       <dt>SNR</dt><dd class={snrClass(node.snr)}>{node.snr !== undefined ? `${node.snr} dB` : '—'}</dd>
       <dt>RSSI</dt><dd>{node.rssi !== undefined ? `${node.rssi} dBm` : '—'}</dd>
-      <dt>Distance</dt><dd>{dist !== undefined ? `${km(dist)} km` : '—'}</dd>
     </dl>
   {/if}
 
@@ -102,16 +109,22 @@
       {/if}
     </dl>
 
-    <div class="section"><span>Position</span></div>
-    <dl class="kv">
-      {#if node.position}
-        <dt>Lat / Lon</dt><dd class="mono">{node.position.lat.toFixed(5)}, {node.position.lon.toFixed(5)}</dd>
-        {#if node.position.alt !== undefined}<dt>Altitude</dt><dd>{node.position.alt} m</dd>{/if}
-      {:else}
-        <dt>—</dt><dd class="faint">No position</dd>
-      {/if}
-    </dl>
   {/if}
+
+  <div class="section"><span>Position</span></div>
+  <dl class="kv">
+    {#if node.position}
+      {#if !isSelf}
+        <dt>Distance</dt>
+        <dd>{dist !== undefined ? `${km(dist)} km` : 'unknown (own position not set)'}</dd>
+      {/if}
+      <dt>Lat / Lon</dt><dd class="mono">{node.position.lat.toFixed(5)}, {node.position.lon.toFixed(5)}</dd>
+      {#if node.position.alt !== undefined}<dt>Altitude</dt><dd>{node.position.alt} m</dd>{/if}
+    {:else}
+      <dt>—</dt><dd class="faint">No position</dd>
+    {/if}
+  </dl>
+  {#if mapPoints.length}<MiniMap points={mapPoints} />{/if}
 </div>
 
 <style>
@@ -137,6 +150,16 @@
   .star {
     color: var(--fair);
     font-size: 13px;
+  }
+  .ign {
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--danger);
+    color: var(--bg);
+    vertical-align: middle;
   }
   .actions {
     display: flex;

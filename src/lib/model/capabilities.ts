@@ -9,7 +9,7 @@ export function capabilitiesFor(protocol: Protocol): Capabilities {
 /** How long after sending we keep counting rebroadcasts. */
 export const REPEAT_WINDOW_MS = 30_000
 /** Rebroadcasts needed within the window for a green tick. */
-export const REPEAT_OK = 2
+export const REPEAT_OK = 1
 
 export interface NodeAction {
   id: string
@@ -18,15 +18,19 @@ export interface NodeAction {
   danger?: boolean
 }
 
-const MT_PEER: NodeAction[] = [
-  { id: 'dm', label: 'Direct message', primary: true },
-  { id: 'traceroute', label: 'Traceroute' },
-  { id: 'req-position', label: 'Request position' },
-  { id: 'req-telemetry', label: 'Request telemetry' },
-  { id: 'exchange-info', label: 'Exchange user info' },
-  { id: 'favorite', label: 'Toggle favorite' },
-  { id: 'remove', label: 'Remove from NodeDB', danger: true },
-]
+function mtPeerActions(node: MeshNode): NodeAction[] {
+  return [
+    { id: 'dm', label: 'Direct message', primary: true },
+    { id: 'traceroute', label: 'Traceroute' },
+    { id: 'req-position', label: 'Request position' },
+    { id: 'req-telemetry', label: 'Request telemetry' },
+    { id: 'exchange-info', label: 'Exchange user info' },
+    { id: 'favorite', label: node.favorite ? 'Unfavorite' : 'Favorite' },
+    // Ignored nodes' packets are dropped by our radio: not shown, not rebroadcast.
+    { id: 'ignore', label: node.ignored ? 'Unignore' : 'Ignore', danger: !node.ignored },
+    { id: 'remove', label: 'Remove from NodeDB', danger: true },
+  ]
+}
 
 const MC_BY_KIND: Partial<Record<NodeKind, NodeAction[]>> = {
   chat: [
@@ -66,12 +70,15 @@ export function radioActions(protocol: Protocol): NodeAction[] {
         { id: 'advert-zero', label: 'Advert (zero hop)' },
         { id: 'advert-flood', label: 'Advert (flood)' },
       ]
-    : [{ id: 'send-nodeinfo', label: 'Send node info' }]
+    : [
+        { id: 'send-nodeinfo', label: 'Send node info' },
+        { id: 'send-position', label: 'Send position' },
+      ]
 }
 
 export function nodeActions(protocol: Protocol, node: MeshNode, isSelf: boolean): NodeAction[] {
   if (isSelf) return [...radioActions(protocol), { id: 'configure', label: 'Configure radio' }]
-  if (protocol === 'meshtastic') return MT_PEER
+  if (protocol === 'meshtastic') return mtPeerActions(node)
   return MC_BY_KIND[node.kind] ?? MC_BY_KIND.chat!
 }
 

@@ -151,6 +151,7 @@ export function mockSession(protocol: Protocol): MockSession {
         ? { lat: HOME.lat + (r() - 0.5) * 0.9, lon: HOME.lon + (r() - 0.5) * 1.8, alt: Math.floor(r() * 300) }
         : undefined,
       favorite: r() < 0.08,
+      ignored: isMt && r() < 0.03,
     })
   }
 
@@ -194,7 +195,7 @@ export function mockSession(protocol: Protocol): MockSession {
         hopStart: mine || !isMt ? undefined : Math.max(from.hops ?? 0, HOP_STARTS[Math.floor(r() * HOP_STARTS.length)]),
         snr: mine ? undefined : Math.round((r() * 20 - 14) * 4) / 4,
         rssi: mine || !isMt ? undefined : Math.round(-128 + r() * 55),
-        repeats: mine ? Math.floor(r() * 5) : undefined,
+        repeats: mine ? Math.floor(r() * (isMt ? 2 : 5)) : undefined,
         settled: mine ? true : undefined,
       })
     }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { flip } from 'svelte/animate'
-  import { ago } from '../../format'
+  import { ago, distanceKm, km } from '../../format'
   import { app } from '../../state.svelte'
   import NodeDetail from '../nodes/NodeDetail.svelte'
   import Conversation from './Conversation.svelte'
@@ -14,15 +14,32 @@
 
   let heardSort = $state<'recent' | 'alpha'>('recent')
 
-  // Nodes that have posted in the active channel, with their last-heard time (any packet).
+  // Freeze order while hovering so entries don't move under the cursor.
+  let hovering = $state(false)
+  let snapshot: { key: string; ids: string[] } | null = null
+  const shown = $derived.by(() => {
+    const key = `${thread}|${heardSort}`
+    if (!hovering || !snapshot || snapshot.key !== key) {
+      snapshot = { key, ids: participants.map((p) => p.node.id) }
+      return participants
+    }
+    const byId = new Map(participants.map((p) => [p.node.id, p]))
+    return snapshot.ids.flatMap((id) => byId.get(id) ?? [])
+  })
+
+  const selfPos = $derived(app.nodeById.get(app.selfId)?.position)
+
+  // Nodes heard on the active channel with the time they were last heard there.
   const participants = $derived.by(() => {
     if (!channel || !thread) return []
-    const ids = new Set<string>()
-    for (const m of app.byThread.get(thread) ?? []) if (m.from !== app.selfId) ids.add(m.from)
-    const list = [...ids].map((id) => app.nodeById.get(id)).filter((n) => !!n)
+    const heard = app.channelHeard[thread] ?? {}
+    const list = Object.entries(heard).flatMap(([id, ts]) => {
+      const node = app.nodeById.get(id)
+      return node && !node.ignored ? [{ node, ts, dist: distanceKm(selfPos, node.position) }] : []
+    })
     return heardSort === 'alpha'
-      ? list.sort((a, b) => a.longName.localeCompare(b.longName, undefined, { sensitivity: 'base' }))
-      : list.sort((a, b) => (b.lastHeard ?? 0) - (a.lastHeard ?? 0))
+      ? list.sort((a, b) => a.node.longName.localeCompare(b.node.longName, undefined, { sensitivity: 'base' }))
+      : list.sort((a, b) => b.ts - a.ts)
   })
 </script>
 
@@ -56,18 +73,19 @@
           <button class:on={heardSort === 'alpha'} onclick={() => (heardSort = 'alpha')}>A–Z</button>
         </span>
       </div>
-      <div class="people">
-        {#each participants as n (n.id)}
+      <div class="people" role="list" onmouseenter={() => (hovering = true)} onmouseleave={() => (hovering = false)}>
+        {#each shown as p (p.node.id)}
           <div animate:flip={{ duration: 300 }}>
-            {#key n.lastHeard}
+            {#key p.ts}
               <button
                 class="ghost person"
-                class:heard-flash={Date.now() - (n.lastHeard ?? 0) < 1500}
-                onclick={() => app.showNode(n.id)}
+                class:heard-flash={Date.now() - p.ts < 1500}
+                onclick={() => app.showNode(p.node.id)}
               >
-                <span class="mono sn">{n.shortName}</span>
-                <span class="pn">{n.longName}</span>
-                <span class="mono ago">{ago(n.lastHeard, app.now)}</span>
+                <span class="mono sn">{p.node.shortName}</span>
+                <span class="pn">{p.node.longName}</span>
+                <span class="mono km" title="distance km">{p.dist !== undefined ? km(p.dist) : ''}</span>
+                <span class="mono ago" title="last heard">{ago(p.ts, app.now)}</span>
               </button>
             {/key}
           </div>
@@ -121,8 +139,14 @@
     white-space: nowrap;
     color: var(--muted);
   }
-  .ago {
+  .km {
     margin-left: auto;
+    flex: none;
+    width: 4ch;
+    text-align: right;
+    color: var(--muted);
+  }
+  .ago {
     flex: none;
     width: 4ch;
     text-align: right;

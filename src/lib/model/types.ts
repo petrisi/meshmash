@@ -43,6 +43,8 @@ export interface MeshNode {
   uptimeS?: number
   position?: Position
   favorite?: boolean
+  /** Meshtastic: packets from this node are dropped by our radio. */
+  ignored?: boolean
 }
 
 export type ChannelKind = 'primary' | 'secondary' | 'public' | 'hashtag' | 'private'
