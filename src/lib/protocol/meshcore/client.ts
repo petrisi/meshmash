@@ -612,7 +612,7 @@ export class MeshCoreClient implements RadioClient {
       case 'advert-zero':
       case 'advert-flood':
         await this.expect(cmdAdvert(action === 'advert-flood'), Resp.OK)
-        this.sink.log({ dir: 'info', kind: 'advert', summary: action === 'advert-flood' ? 'flood advert sent' : 'zero-hop advert sent' })
+        this.sink.actionResult(id, action, true, action === 'advert-flood' ? 'Flood advert sent' : 'Zero-hop advert sent')
         return
     }
     if (!c) return
@@ -760,14 +760,15 @@ export class MeshCoreClient implements RadioClient {
 
   /** Trace out along the stored path to the node and back, recording SNR per hop. */
   private async trace(id: string, c: Contact) {
-    if (c.outPathLen === OUT_PATH_FLOOD) throw new Error('No known path; use Find path first')
-    const path = decodePath(c.outPathLen, c.outPath) ?? []
+    // Without a known path, try it as a direct neighbour; a trace needs no login.
+    const unknownPath = c.outPathLen === OUT_PATH_FLOOD
+    const path = unknownPath ? [] : (decodePath(c.outPathLen, c.outPath) ?? [])
     // Trace hashes are 1 byte per hop here; path hashes may be longer.
     const first = path.map((h) => parseInt(h.slice(0, 2), 16))
     const hashes = Uint8Array.from([...first, c.publicKey[0], ...[...first].reverse()])
     const tag = crypto.getRandomValues(new Uint32Array(1))[0]
     const f = await this.remote(cmdTracePath(tag, hashes), [Push.TRACE_DATA], (f) => decodeTraceData(f).tag === tag)
-    if (!f) return this.sink.actionResult(id, 'trace', false, 'No answer')
+    if (!f) return this.sink.actionResult(id, 'trace', false, unknownPath ? 'No answer as a direct neighbour (no known path)' : 'No answer')
     const t = decodeTraceData(f)
     const self = this.self ? idOf(this.self.publicKey) : ''
     const via = this.resolveHops(path)

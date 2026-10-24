@@ -2,6 +2,7 @@
   import { battery } from '../format'
   import { radioActions } from '../model/capabilities'
   import { app } from '../state.svelte'
+  import ActionButton from './ActionButton.svelte'
 
   const s = $derived(app.session!)
   const info = $derived(s.info)
@@ -26,7 +27,7 @@
   <span class="muted">{radioSummary}</span>
   <span class="spacer"></span>
   {#each radioActions(info.protocol) as a (a.id)}
-    <button onclick={() => app.runAction(a.id, info.nodeId)}>{a.label}</button>
+    <ActionButton action={a.id} nodeId={info.nodeId} label={a.label} />
   {/each}
   <span class="muted">{app.nodes.length} nodes</span>
   {#if info.batteryPct !== undefined}

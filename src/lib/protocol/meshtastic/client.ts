@@ -107,6 +107,8 @@ export class MeshtasticClient implements RadioClient {
   /** Packets are written one at a time, each after the radio took the previous one. */
   private txChain: Promise<unknown> = Promise.resolve()
   private accepting = new Map<number, () => void>()
+  /** Called when the radio takes a packet (or the wait for that times out). */
+  private onAccepted = new Map<number, (confirmed: boolean) => void>()
   /** When the radio last took a packet per portnum, for its per-port rate limits. */
   private lastAccepted = new Map<number, number>()
 
@@ -492,12 +494,14 @@ export class MeshtasticClient implements RadioClient {
       .then(
         () =>
           new Promise<void>((resolve) => {
-            const timer = setTimeout(done, ACCEPT_TIMEOUT_MS)
+            const timer = setTimeout(() => done(false), ACCEPT_TIMEOUT_MS)
             const self = this
-            function done() {
+            function done(confirmed = true) {
               clearTimeout(timer)
               self.accepting.delete(id)
               self.lastAccepted.set(portnum, Date.now())
+              self.onAccepted.get(id)?.(confirmed)
+              self.onAccepted.delete(id)
               resolve()
             }
             this.accepting.set(id, done)
@@ -577,12 +581,16 @@ export class MeshtasticClient implements RadioClient {
         return
       }
       case 'send-nodeinfo':
-        if (self?.user) await this.sendPacket(BROADCAST, Port.NODEINFO, ownUser(self.user))
+      case 'send-position': {
+        const isInfo = action === 'send-nodeinfo'
+        if (isInfo ? !self?.user : !self?.position?.lat) throw new Error(isInfo ? 'Own user info unknown' : 'Own position unknown')
+        const payload = isInfo ? ownUser(self!.user!) : encodePosition(self!.position!)
+        const pid = await this.sendPacket(BROADCAST, isInfo ? Port.NODEINFO : Port.POSITION, payload)
+        this.onAccepted.set(pid, (ok) =>
+          this.sink.actionResult(id, action, ok, ok ? 'Broadcast sent' : 'Radio did not confirm'),
+        )
         return
-      case 'send-position':
-        if (self?.position?.lat) await this.sendPacket(BROADCAST, Port.POSITION, encodePosition(self.position))
-        else this.sink.log({ dir: 'info', kind: 'position', summary: 'own position unknown, nothing sent' })
-        return
+      }
       case 'favorite':
       case 'ignore':
       case 'remove': {

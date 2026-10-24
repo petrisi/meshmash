@@ -28,6 +28,7 @@ let localSeq = 0
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
+  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position',
 ])
 /** Covers slow serial polling plus a multi-hop round trip. */
 const REQUEST_TIMEOUT_MS = 90_000
@@ -430,17 +431,14 @@ class AppState {
     // Demo implementations.
     switch (action) {
       case 'advert-zero':
-        this.pushLog('Advert sent (zero hop)')
-        return
       case 'advert-flood':
-        this.pushLog('Advert sent (flood)')
-        return
       case 'send-nodeinfo':
-        this.pushLog('Node info broadcast')
+      case 'send-position': {
+        const text = { 'advert-zero': 'Zero-hop advert sent', 'advert-flood': 'Flood advert sent', 'send-nodeinfo': 'Node info broadcast', 'send-position': 'Position broadcast' }[action]
+        this.pushLog(text)
+        this.#result(nodeId, action, 'ok', text)
         return
-      case 'send-position':
-        this.pushLog('Position broadcast')
-        return
+      }
       case 'ignore':
         node.ignored = !node.ignored
         this.pushLog(`${node.ignored ? 'Ignored' : 'Unignored'} ${node.longName}`)
