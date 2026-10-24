@@ -197,7 +197,12 @@ export function decodeDeviceMetrics(b: Uint8Array): DeviceMetrics {
   for (const f of fields(b)) {
     switch (f.no) {
       case 1: m.batteryLevel = asUint(f.value); break
-      case 2: m.voltage = asFloat(f.value); break
+      case 2: {
+        // Firmware sends a tiny negative value when no battery is sensed.
+        const v = asFloat(f.value)
+        m.voltage = v > 0 ? v : undefined
+        break
+      }
       case 3: m.channelUtil = asFloat(f.value); break
       case 4: m.airUtilTx = asFloat(f.value); break
       case 5: m.uptime = asUint(f.value); break
