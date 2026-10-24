@@ -639,6 +639,9 @@ function routingErrorText(err: number): string {
     case 'MAX_RETRANSMIT': return 'No acknowledgement after retries'
     case 'NO_ROUTE': return 'No route to node'
     case 'TIMEOUT': return 'Timed out'
+    case 'PKI_SEND_FAIL_PUBLIC_KEY': return "Node's public key unknown; exchange user info first"
+    case 'PKI_UNKNOWN_PUBKEY': return 'Node does not know our public key'
+    case 'RATE_LIMIT_EXCEEDED': return 'Rate limited by the radio'
     default: return `Failed: ${ROUTING_ERROR[err] ?? err}`
   }
 }
