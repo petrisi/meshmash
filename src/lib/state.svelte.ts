@@ -169,9 +169,9 @@ class AppState {
     try {
       await t.open()
       t.onClose = (reason) => sink.closed(reason)
-      const protocol = await detectProtocol(t, sink)
+      const { protocol, probe } = await detectProtocol(t, sink)
       this.#client = protocol === 'meshtastic' ? new MeshtasticClient(t, sink) : new MeshCoreClient(t, sink)
-      await this.#client.start()
+      await this.#client.start(probe)
     } catch (e) {
       this.connectError = e instanceof Error ? e.message : String(e)
       this.connecting = null

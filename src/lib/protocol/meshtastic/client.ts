@@ -2,7 +2,7 @@ import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
 import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import { hex, utf8Decode, utf8Encode } from '../bytes'
-import type { RadioClient, RadioSink } from '../types'
+import type { Probe, RadioClient, RadioSink } from '../types'
 import type { SerialTransport } from '../../transport/serial'
 import {
   Admin,
@@ -105,24 +105,35 @@ export class MeshtasticClient implements RadioClient {
     t.onData = (c) => this.onData(c)
   }
 
-  async start() {
+  async start(probe?: Probe) {
     this.sink.progress('Requesting configuration…')
-    await this.t.write(WAKE)
-    await this.requestConfig()
+    if (probe) {
+      // Detection already asked for the config; continue with its stream.
+      const done = this.awaitConfig(probe.nonce)
+      for (const chunk of probe.received) this.onData(chunk)
+      await done
+    } else {
+      await this.t.write(WAKE)
+      await this.requestConfig()
+    }
     this.heartbeat = setInterval(() => void this.send(toRadioHeartbeat(), 'heartbeat'), 60_000)
   }
 
   private requestConfig() {
-    this.nonce = safeNonce()
-    const done = new Promise<void>((resolve, reject) => {
+    const done = this.awaitConfig(safeNonce())
+    void this.send(toRadioWantConfig(this.nonce), `want_config_id ${this.nonce}`)
+    return done
+  }
+
+  private awaitConfig(nonce: number) {
+    this.nonce = nonce
+    return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Timed out waiting for configuration')), 45_000)
       this.configDone = () => {
         clearTimeout(timer)
         resolve()
       }
     })
-    void this.send(toRadioWantConfig(this.nonce), `want_config_id ${this.nonce}`)
-    return done
   }
 
   async close() {

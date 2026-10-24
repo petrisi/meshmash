@@ -39,10 +39,20 @@ export interface RadioSink {
   closed(reason?: string): void
 }
 
+export interface Probe {
+  /** Meshtastic want_config nonce sent during detection. */
+  nonce: number
+  /** Raw bytes received since the first probe. */
+  received: Uint8Array[]
+}
+
 export interface RadioClient {
   readonly protocol: Protocol
-  /** Runs the connect handshake and initial download. */
-  start(): Promise<void>
+  /**
+   * Runs the connect handshake and initial download. `probe` is what detection already
+   * requested and received, so a slow radio is not asked twice.
+   */
+  start(probe?: Probe): Promise<void>
   close(): Promise<void>
   /** localId is the id the UI already gave the pending message. */
   sendText(thread: ThreadKey, text: string, localId: string): Promise<void>
