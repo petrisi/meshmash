@@ -163,4 +163,6 @@ export interface TracerouteResult {
   snrBack?: number[]
   /** Request to answer, ms (includes serial polling delays). */
   rttMs?: number
+  /** MeshCore path discovery: the route found can be saved to the contact. */
+  discovered?: boolean
 }

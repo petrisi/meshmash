@@ -10,6 +10,7 @@ export const Cmd = {
   GET_DEVICE_TIME: 5,
   SET_DEVICE_TIME: 6,
   SEND_SELF_ADVERT: 7,
+  ADD_UPDATE_CONTACT: 9,
   SYNC_NEXT_MESSAGE: 10,
   RESET_PATH: 13,
   REMOVE_CONTACT: 15,
@@ -328,6 +329,9 @@ export interface PathDiscovery {
   prefix: Uint8Array
   out?: string[]
   in?: string[]
+  /** Encoded out path as found, for CMD_ADD_UPDATE_CONTACT. */
+  outLen: number
+  outBytes: Uint8Array
 }
 
 export function decodePathDiscovery(f: Uint8Array): PathDiscovery {
@@ -339,7 +343,7 @@ export function decodePathDiscovery(f: Uint8Array): PathDiscovery {
   const outBytes = outLen === OUT_PATH_FLOOD ? new Uint8Array() : r.bytes(((outLen >> 6) + 1) * (outLen & 63))
   const inLen = r.u8()
   const inBytes = inLen === OUT_PATH_FLOOD ? new Uint8Array() : r.bytes(((inLen >> 6) + 1) * (inLen & 63))
-  return { prefix, out: decodePath(outLen, outBytes), in: decodePath(inLen, inBytes) }
+  return { prefix, out: decodePath(outLen, outBytes), in: decodePath(inLen, inBytes), outLen, outBytes: outBytes.slice() }
 }
 
 /** LOG_RX_DATA: SNR, RSSI and the raw over-the-air packet. */
@@ -399,6 +403,27 @@ export const cmdGetBattery = () => Uint8Array.of(Cmd.GET_BATT_AND_STORAGE)
 export const cmdSyncNext = () => Uint8Array.of(Cmd.SYNC_NEXT_MESSAGE)
 export const cmdAdvert = (flood: boolean) => Uint8Array.of(Cmd.SEND_SELF_ADVERT, flood ? 1 : 0)
 export const cmdGetContactByKey = (pk: Uint8Array) => new LeWriter().u8(Cmd.GET_CONTACT_BY_KEY).bytes(pk).finish()
+/** CMD_ADD_UPDATE_CONTACT with the full 148-byte record (docs/meshcore/companion-protocol.md §6). */
+export function cmdUpdateContact(c: Contact): Uint8Array {
+  const path = new Uint8Array(MAX_PATH_SIZE)
+  path.set(c.outPath.subarray(0, MAX_PATH_SIZE))
+  const name = new Uint8Array(32)
+  name.set(utf8Encode(c.name).subarray(0, 31))
+  return new LeWriter()
+    .u8(Cmd.ADD_UPDATE_CONTACT)
+    .bytes(c.publicKey)
+    .u8(c.type)
+    .u8(c.flags)
+    .u8(c.outPathLen)
+    .bytes(path)
+    .bytes(name)
+    .u32(c.lastAdvert)
+    .i32(Math.round(c.lat * 1e6))
+    .i32(Math.round(c.lon * 1e6))
+    .u32(c.lastMod)
+    .finish()
+}
+
 export const cmdResetPath = (pk: Uint8Array) => new LeWriter().u8(Cmd.RESET_PATH).bytes(pk).finish()
 export const cmdRemoveContact = (pk: Uint8Array) => new LeWriter().u8(Cmd.REMOVE_CONTACT).bytes(pk).finish()
 export const cmdShareContact = (pk: Uint8Array) => new LeWriter().u8(Cmd.SHARE_CONTACT).bytes(pk).finish()

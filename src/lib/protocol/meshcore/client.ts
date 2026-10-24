@@ -54,6 +54,7 @@ import {
   decodeRxLog,
   decodeSelfInfo,
   decodeSent,
+  cmdUpdateContact,
   OUT_PATH_FLOOD,
   groupTextCiphertext,
   PayloadType,
@@ -108,7 +109,8 @@ export class MeshCoreClient implements RadioClient {
   private syncing = false
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
-  private discoveries = new Set<string>()
+  /** Routes found by path discovery, kept for "Use this path". */
+  private discovered = new Map<string, { outLen: number; outBytes: Uint8Array }>()
   private secrets = new Map<number, Uint8Array>()
   /**
    * The radio matches only one outstanding remote request (login, status, telemetry, binary,
@@ -454,6 +456,7 @@ export class MeshCoreClient implements RadioClient {
         }
         return
       }
+      case Push.PATH_DISCOVERY_RESPONSE:
       case Push.LOGIN_SUCCESS:
       case Push.LOGIN_FAIL:
       case Push.STATUS_RESPONSE:
@@ -475,20 +478,6 @@ export class MeshCoreClient implements RadioClient {
           this.sink.updateMessage(pend.localId, { status: 'acked', settled: true })
           this.sink.log({ dir: 'info', kind: 'ack', summary: `delivered, round trip ${rtt} ms` })
         }
-        return
-      }
-      case Push.PATH_DISCOVERY_RESPONSE: {
-        const d = decodePathDiscovery(f)
-        const id = hex(d.prefix)
-        if (!this.discoveries.delete(id)) return
-        const self = this.self ? idOf(this.self.publicKey) : ''
-        this.sink.traceroute({
-          nodeId: id,
-          ts: Date.now(),
-          towards: [self, ...this.resolveHops(d.out), id],
-          snrTowards: [],
-          back: d.in ? [id, ...this.resolveHops(d.in), self] : undefined,
-        })
         return
       }
       case Push.CONTACT_DELETED:
@@ -641,9 +630,17 @@ export class MeshCoreClient implements RadioClient {
         this.sink.node({ id, path: undefined, hops: undefined })
         return
       case 'path-discovery':
-        decodeSent(await this.expect(cmdPathDiscovery(c.publicKey), Resp.SENT))
-        this.discoveries.add(id)
+        return this.discoverPath(id, c)
+      case 'use-path': {
+        const d = this.discovered.get(id)
+        if (!d) throw new Error('No discovered path')
+        const updated = { ...c, outPathLen: d.outLen, outPath: d.outBytes }
+        await this.expect(cmdUpdateContact(updated), Resp.OK)
+        this.contacts.set(id, updated)
+        this.sink.node({ id, path: decodePath(d.outLen, d.outBytes), hops: pathHops(d.outLen) })
+        this.sink.actionResult(id, action, true, 'Path saved')
         return
+      }
       case 'req-status':
         return this.status(id, c)
       case 'req-telemetry':
@@ -774,6 +771,29 @@ export class MeshCoreClient implements RadioClient {
     const text = new TextDecoder().decode(body).replace(/\0+$/, '')
     this.sink.remote(id, { owner: { ts: Date.now(), text } })
     this.sink.actionResult(id, 'req-owner', true, 'Owner info received')
+  }
+
+  /**
+   * Floods a request whose answer carries the route both ways. The radio does not store the
+   * route it finds; "Use this path" writes it to the contact.
+   */
+  private async discoverPath(id: string, c: Contact) {
+    const f = await this.remote(cmdPathDiscovery(c.publicKey), [Push.PATH_DISCOVERY_RESPONSE], (f) => pushPrefix(f) === id)
+    if (!f) {
+      const hint = c.type === ContactType.CHAT ? 'telemetry not shared, or out of reach' : 'log in first?'
+      return this.sink.actionResult(id, 'path-discovery', false, `No answer (${hint})`)
+    }
+    const d = decodePathDiscovery(f)
+    this.discovered.set(id, { outLen: d.outLen, outBytes: d.outBytes })
+    const self = this.self ? idOf(this.self.publicKey) : ''
+    this.sink.traceroute({
+      nodeId: id,
+      ts: Date.now(),
+      towards: [self, ...this.resolveHops(d.out), id],
+      snrTowards: [],
+      back: d.in ? [id, ...this.resolveHops(d.in), self] : undefined,
+      discovered: true,
+    })
   }
 
   /** Trace out along the stored path to the node and back, recording SNR per hop. */

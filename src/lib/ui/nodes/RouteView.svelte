@@ -2,6 +2,7 @@
   import { ago, snrClass } from '../../format'
   import type { TracerouteResult } from '../../model/types'
   import { app } from '../../state.svelte'
+  import ActionButton from '../ActionButton.svelte'
 
   let { nodeId }: { nodeId: string } = $props()
 
@@ -45,12 +46,18 @@
         {#each leg.ids as id, i (i)}
           <li>
             <button class="hop" onclick={() => app.nodeById.has(id) && app.showNode(id)}>{name(id)}</button>
-            {#if i > 0}<span class="mono {snrClass(leg.snr[i - 1])}">{db(leg.snr[i - 1])}</span>{/if}
+            {#if i > 0 && leg.snr.length}<span class="mono {snrClass(leg.snr[i - 1])}">{db(leg.snr[i - 1])}</span>{/if}
           </li>
         {/each}
       </ol>
     {/each}
     {#if !tr.back}<div class="faint small">No return route reported.</div>{/if}
+    {#if tr.discovered && picked === 0}
+      <div class="use">
+        <span class="faint small">Found by path discovery; the radio keeps its old path until saved.</span>
+        <ActionButton action="use-path" {nodeId} label="Use this path" />
+      </div>
+    {/if}
   </div>
 
   {#if history.length > 1}
@@ -101,6 +108,12 @@
   }
   .hop:hover {
     text-decoration: underline;
+  }
+  .use {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
   }
   .small {
     font-size: 11px;

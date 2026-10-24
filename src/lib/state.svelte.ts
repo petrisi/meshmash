@@ -33,7 +33,7 @@ const SAMPLES_MAX = 1000
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
-  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position',
+  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path',
 ])
 /** Covers slow serial polling plus a multi-hop round trip. */
 const REQUEST_TIMEOUT_MS = 90_000
