@@ -2,7 +2,7 @@ import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
 import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { SerialTransport } from '../../transport/serial'
-import { hex, LeReader, utf8Encode } from '../bytes'
+import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { RadioClient, RadioSink } from '../types'
 import {
   cmdAdvert,
@@ -13,6 +13,7 @@ import {
   cmdGetContactByKey,
   cmdGetContacts,
   cmdGetTime,
+  cmdSetTime,
   cmdName,
   cmdPathDiscovery,
   cmdRemoveContact,
@@ -34,6 +35,8 @@ import {
   decodeRxLog,
   decodeSelfInfo,
   decodeSent,
+  groupTextCiphertext,
+  PayloadType,
   type DeviceInfo,
   encodeFrame,
   ERR_NAMES,
@@ -85,6 +88,9 @@ export class MeshCoreClient implements RadioClient {
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
   private discoveries = new Set<string>()
+  private secrets = new Map<number, Uint8Array>()
+  /** Our recent channel messages, matched against overheard repeats. */
+  private echoes: { ct: Uint8Array; localId: string; count: number }[] = []
 
   constructor(
     private t: SerialTransport,
@@ -184,6 +190,16 @@ export class MeshCoreClient implements RadioClient {
     this.clockOffset = new LeReader(t.subarray(1)).u32() * 1000 - Date.now()
     if (Math.abs(this.clockOffset) > 60_000)
       this.sink.log({ dir: 'info', kind: 'clock', summary: `radio clock off by ${Math.round(this.clockOffset / 1000)} s` })
+    // Firmware only accepts forward adjustments.
+    if (this.clockOffset < -5_000) {
+      try {
+        await this.expect(cmdSetTime(Math.floor(Date.now() / 1000)), Resp.OK)
+        this.clockOffset = 0
+        this.sink.log({ dir: 'info', kind: 'clock', summary: 'radio clock set' })
+      } catch (e) {
+        this.sink.log({ dir: 'info', kind: 'clock', summary: `clock set failed: ${(e as Error).message}` })
+      }
+    }
 
     let millivolts = 0
     try {
@@ -258,6 +274,7 @@ export class MeshCoreClient implements RadioClient {
       try {
         const c = decodeChannelInfo(await this.expect(cmdGetChannel(i), Resp.CHANNEL_INFO))
         if (!c.name) continue
+        this.secrets.set(c.index, c.secret)
         out.push({
           index: c.index,
           name: c.name,
@@ -376,6 +393,16 @@ export class MeshCoreClient implements RadioClient {
         this.sink.heard(id, Date.now())
         this.sink.node({ id, lastHeard: Date.now() })
         void this.refreshContact(f.subarray(1, 33))
+        return
+      }
+      case Push.LOG_RX_DATA: {
+        const r = decodeRxLog(f)
+        if (r.payloadType !== PayloadType.GRP_TXT) return
+        for (const e of this.echoes) {
+          if (!endsWith(r.raw, e.ct)) continue
+          e.count++
+          this.sink.updateMessage(e.localId, { repeats: e.count })
+        }
         return
       }
       case Push.SEND_CONFIRMED: {
@@ -505,10 +532,16 @@ export class MeshCoreClient implements RadioClient {
   async sendText(thread: ThreadKey, text: string, localId: string) {
     const ts = Math.floor((Date.now() + this.clockOffset) / 1000)
     if (thread.startsWith('ch:')) {
-      await this.expect(cmdSendChannelText(Number(thread.slice(3)), text, ts), Resp.OK)
+      const index = Number(thread.slice(3))
+      const secret = this.secrets.get(index)
+      const echo = secret && { ct: await groupTextCiphertext(secret, ts, this.self?.name ?? '', text), localId, count: 0 }
+      if (echo) this.echoes.push(echo)
+      await this.expect(cmdSendChannelText(index, text, ts), Resp.OK)
       this.sink.updateMessage(localId, { status: 'sent' })
-      // Repeat counting for channel messages needs packet matching via LOG_RX_DATA (not yet).
-      setTimeout(() => this.sink.updateMessage(localId, { settled: true }), REPEAT_WINDOW_MS)
+      setTimeout(() => {
+        if (echo) this.echoes = this.echoes.filter((e) => e !== echo)
+        this.sink.updateMessage(localId, { settled: true })
+      }, REPEAT_WINDOW_MS)
       return
     }
     const c = this.contacts.get(thread.slice(3))

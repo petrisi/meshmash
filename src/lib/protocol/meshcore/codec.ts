@@ -356,6 +356,28 @@ export function decodeRxLog(f: Uint8Array) {
   }
 }
 
+/**
+ * Ciphertext of a GRP_TXT the radio sends for us: AES-128-ECB over
+ * [ts u32][txt type 0]["<name>: <text>"], zero-padded. Used to recognise
+ * repeats of our own channel messages in LOG_RX_DATA.
+ */
+export async function groupTextCiphertext(secret: Uint8Array, ts: number, name: string, text: string) {
+  const body = utf8Encode(`${name}: ${text}`)
+  const plain = new Uint8Array(Math.ceil((5 + body.length) / 16) * 16)
+  new DataView(plain.buffer).setUint32(0, ts, true)
+  plain.set(body, 5)
+  const key = await crypto.subtle.importKey('raw', secret.slice(0, 16), 'AES-CBC', false, ['encrypt'])
+  const out = new Uint8Array(plain.length)
+  // ECB via single-block CBC with a zero IV; WebCrypto has no ECB mode.
+  for (let i = 0; i < plain.length; i += 16) {
+    const block = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: new Uint8Array(16) }, key, plain.slice(i, i + 16))
+    out.set(new Uint8Array(block, 0, 16), i)
+  }
+  return out
+}
+
+export const PayloadType = { GRP_TXT: 5 } as const
+
 export const PAYLOAD_TYPES: Record<number, string> = {
   0: 'REQ', 1: 'RESPONSE', 2: 'TXT_MSG', 3: 'ACK', 4: 'ADVERT', 5: 'GRP_TXT', 6: 'GRP_DATA',
   7: 'ANON_REQ', 8: 'PATH', 9: 'TRACE', 10: 'MULTIPART', 11: 'CONTROL', 15: 'RAW_CUSTOM',
@@ -369,6 +391,7 @@ export const cmdAppStart = (appName: string) =>
 export const cmdGetContacts = () => Uint8Array.of(Cmd.GET_CONTACTS)
 export const cmdGetChannel = (i: number) => Uint8Array.of(Cmd.GET_CHANNEL, i)
 export const cmdGetTime = () => Uint8Array.of(Cmd.GET_DEVICE_TIME)
+export const cmdSetTime = (secs: number) => new LeWriter().u8(Cmd.SET_DEVICE_TIME).u32(secs).finish()
 export const cmdGetBattery = () => Uint8Array.of(Cmd.GET_BATT_AND_STORAGE)
 export const cmdSyncNext = () => Uint8Array.of(Cmd.SYNC_NEXT_MESSAGE)
 export const cmdAdvert = (flood: boolean) => Uint8Array.of(Cmd.SEND_SELF_ADVERT, flood ? 1 : 0)

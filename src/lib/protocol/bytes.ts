@@ -102,3 +102,10 @@ export class LeWriter {
     return Uint8Array.from(this.parts)
   }
 }
+
+export function endsWith(a: Uint8Array, suffix: Uint8Array): boolean {
+  if (suffix.length > a.length) return false
+  const off = a.length - suffix.length
+  for (let i = 0; i < suffix.length; i++) if (a[off + i] !== suffix[i]) return false
+  return true
+}
