@@ -178,6 +178,13 @@ class AppState {
     }
   }
 
+  /** Development aid: writes raw bytes to the open port. */
+  async debugWrite(bytes: Uint8Array | number[]) {
+    const b = Uint8Array.from(bytes)
+    this.#log({ dir: 'tx', kind: 'debug', summary: 'raw write', bytes: b })
+    await this.#transport?.write(b)
+  }
+
   get isDemo() {
     return !this.#client
   }

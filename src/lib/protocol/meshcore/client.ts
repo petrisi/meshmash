@@ -427,12 +427,24 @@ export class MeshCoreClient implements RadioClient {
     if (this.syncing) return
     this.syncing = true
     try {
-      for (;;) {
+      // A reply is occasionally lost on the USB link; a lost "no more messages" is
+      // harmless to retry, so retry a few times before giving up.
+      for (let misses = 0; ; ) {
         let frame: Uint8Array | undefined
-        await this.request(cmdSyncNext(), (f) => {
-          frame = f
-          return true
-        })
+        try {
+          await this.request(
+            cmdSyncNext(),
+            (f) => {
+              frame = f
+              return true
+            },
+            2000,
+          )
+        } catch (e) {
+          if (e instanceof CommandError || ++misses > 2) throw e
+          continue
+        }
+        misses = 0
         if (!frame || frame[0] === Resp.NO_MORE_MESSAGES) break
         this.onMessageFrame(frame)
       }
