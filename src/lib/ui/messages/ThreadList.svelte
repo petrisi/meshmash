@@ -16,7 +16,7 @@
   function preview(k: ThreadKey) {
     const m = lastOf(k)
     if (!m) return ''
-    const who = m.from === app.selfId ? 'You' : (app.nodeById.get(m.from)?.shortName ?? '?')
+    const who = m.from === app.selfId ? 'You' : (app.nodeById.get(m.from)?.shortName ?? m.fromName ?? '?')
     return k.startsWith('dm:') && m.from !== app.selfId ? m.text : `${who}: ${m.text}`
   }
 </script>

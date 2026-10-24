@@ -1,7 +1,32 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { app } from '../state.svelte'
 
   const hasSerial = 'serial' in navigator
+  let known = $state<SerialPort[]>([])
+
+  const label = (p: SerialPort) => {
+    const i = p.getInfo()
+    const h = (n?: number) => (n ?? 0).toString(16).padStart(4, '0')
+    return i.usbVendorId !== undefined ? `USB ${h(i.usbVendorId)}:${h(i.usbProductId)}` : 'Serial port'
+  }
+
+  async function refresh() {
+    if (hasSerial) known = await navigator.serial.getPorts()
+  }
+
+  onMount(() => {
+    void refresh()
+    if (!hasSerial) return
+    navigator.serial.addEventListener('connect', refresh)
+    navigator.serial.addEventListener('disconnect', refresh)
+    return () => {
+      navigator.serial.removeEventListener('connect', refresh)
+      navigator.serial.removeEventListener('disconnect', refresh)
+    }
+  })
+
+  const lastLines = $derived(app.log.slice(-8))
 </script>
 
 <div class="wrap">
@@ -9,18 +34,45 @@
     <h1>meshmash</h1>
     <p class="muted">Web client for Meshtastic® and MeshCore radios.</p>
 
-    <button class="primary big" disabled={!hasSerial} title="Protocol layer not implemented yet">
-      Connect USB radio
-    </button>
-    {#if !hasSerial}
-      <p class="poor small">This browser has no Web Serial support. Use Chrome, Edge or another Chromium browser.</p>
-    {/if}
+    {#if app.connecting}
+      <div class="progress">
+        <i class="spin"></i>
+        <span>{app.connecting}</span>
+      </div>
+      <div class="tail mono">
+        {#each lastLines as e, i (i)}
+          <div class="faint">{e.dir} {e.kind} {e.summary}</div>
+        {/each}
+      </div>
+      <button onclick={() => app.disconnect()}>Cancel</button>
+    {:else}
+      <button class="primary big" disabled={!hasSerial} onclick={() => app.connectSerial()}>
+        Connect USB radio
+      </button>
+      {#if known.length}
+        <div class="known">
+          <span class="faint small">Previously allowed ports</span>
+          {#each known as p, i (i)}
+            <button onclick={() => app.connectSerial(p)}>
+              <span class="mono">{label(p)}</span>
+              <span class="faint">connect</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if !hasSerial}
+        <p class="poor small">This browser has no Web Serial support. Use Chrome, Edge or another Chromium browser.</p>
+      {/if}
+      {#if app.connectError}
+        <p class="poor small">{app.connectError}</p>
+      {/if}
 
-    <div class="sep"><span>or try a demo</span></div>
-    <div class="demos">
-      <button onclick={() => app.connectDemo('meshtastic')}>Demo: Meshtastic</button>
-      <button onclick={() => app.connectDemo('meshcore')}>Demo: MeshCore</button>
-    </div>
+      <div class="sep"><span>or try a demo</span></div>
+      <div class="demos">
+        <button onclick={() => app.connectDemo('meshtastic')}>Demo: Meshtastic</button>
+        <button onclick={() => app.connectDemo('meshcore')}>Demo: MeshCore</button>
+      </div>
+    {/if}
 
     <p class="faint small legal">
       Not affiliated with or endorsed by Meshtastic LLC or the MeshCore project. Meshtastic® is a registered
@@ -36,7 +88,7 @@
     place-items: center;
   }
   .card {
-    width: 380px;
+    width: 420px;
     padding: 28px;
     background: var(--panel);
     border: 1px solid var(--border);
@@ -60,6 +112,45 @@
   }
   .small {
     font-size: 12px;
+  }
+  .known {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .known button {
+    display: flex;
+    justify-content: space-between;
+  }
+  .progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 14px;
+  }
+  .spin {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--faint);
+    border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .tail {
+    font-size: 10.5px;
+    max-height: 140px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .tail div {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .sep {
     display: flex;

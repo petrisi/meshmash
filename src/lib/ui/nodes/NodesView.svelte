@@ -174,7 +174,7 @@
                 {#if n.ignored}<span class="ign">IGN</span>{/if}
                 <span class="mono faint id">{n.id}</span>
               </td>
-              <td class="muted">{KIND_LABEL[n.kind]}</td>
+              <td class="muted">{n.role ?? KIND_LABEL[n.kind]}</td>
               <td class="muted hw">{n.hwModel ?? ''}</td>
               <td class="num">{isSelf ? '' : ago(n.lastHeard, app.now)}</td>
               <td class="num">{isSelf ? '' : (n.hops ?? '—')}</td>

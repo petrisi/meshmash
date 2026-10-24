@@ -12,6 +12,7 @@
     { view: 'messages', label: 'Messages', icon: 'M3 5h18v11H8l-5 4z' },
     { view: 'nodes', label: 'Nodes', icon: 'M6 6m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M18 8m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M10 18m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M7.5 8l2 7.5M15.6 9.2l-4 6.8M8.4 6.3l7.2 1.4' },
     { view: null, label: 'Map', icon: 'M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14', disabled: true },
+    { view: 'log', label: 'Log', icon: 'M4 5h16M4 10h16M4 15h10M4 20h7' },
     { view: null, label: 'Config', icon: 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1', disabled: true },
   ]
 </script>

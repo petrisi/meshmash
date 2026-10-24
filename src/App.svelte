@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from './lib/state.svelte'
   import ConnectScreen from './lib/ui/ConnectScreen.svelte'
+  import LogView from './lib/ui/LogView.svelte'
   import MessagesView from './lib/ui/messages/MessagesView.svelte'
   import NavRail from './lib/ui/NavRail.svelte'
   import NodesView from './lib/ui/nodes/NodesView.svelte'
@@ -12,13 +13,13 @@
   })
 </script>
 
-{#if app.session}
+{#if app.session && !app.connecting}
   <div class="shell">
     <TopBar />
     <div class="body">
       <NavRail />
       <main>
-        {#if app.view === 'messages'}<MessagesView />{:else}<NodesView />{/if}
+        {#if app.view === 'messages'}<MessagesView />{:else if app.view === 'nodes'}<NodesView />{:else}<LogView />{/if}
       </main>
     </div>
     <StatusBar />

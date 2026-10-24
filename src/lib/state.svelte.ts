@@ -10,8 +10,16 @@ import type {
   TracerouteResult,
 } from './model/types'
 import { mockSession } from './mock/mock'
+import { detectProtocol } from './protocol/detect'
+import { MeshCoreClient } from './protocol/meshcore/client'
+import { MeshtasticClient } from './protocol/meshtastic/client'
+import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
+import { loadMessages, saveMessage } from './store/db'
+import { SerialTransport } from './transport/serial'
 
-export type View = 'messages' | 'nodes'
+export type View = 'messages' | 'nodes' | 'log'
+
+const LOG_MAX = 5000
 
 export interface Session {
   info: RadioInfo
@@ -38,7 +46,12 @@ class AppState {
   view = $state<View>('messages')
   activeThread = $state<ThreadKey | null>(null)
   selectedNode = $state<string | null>(null)
-  log = $state<{ ts: number; text: string }[]>([])
+  log = $state<LogEntry[]>([])
+  /** Set while a radio connection is being established. */
+  connecting = $state<string | null>(null)
+  connectError = $state<string | null>(null)
+  #client: RadioClient | null = null
+  #transport: SerialTransport | null = null
   /** Ticks every second so relative times ("3s", "47m") stay current. */
   now = $state(Date.now())
   #timers: ReturnType<typeof setInterval>[] = []
@@ -138,17 +151,138 @@ class AppState {
     this.#timers.push(t)
   }
 
-  disconnect() {
+  /** Real radio over Web Serial. Without a port, asks the user to pick one. */
+  async connectSerial(port?: SerialPort) {
+    this.connectError = null
+    this.connecting = 'Opening port…'
+    this.log = []
+    try {
+      port ??= await navigator.serial.requestPort()
+    } catch {
+      this.connecting = null // picker cancelled
+      return
+    }
+    const t = new SerialTransport(port)
+    this.#transport = t
+    const sink = this.#sink(t)
+    try {
+      await t.open()
+      t.onClose = (reason) => sink.closed(reason)
+      const protocol = await detectProtocol(t, sink)
+      this.#client = protocol === 'meshtastic' ? new MeshtasticClient(t, sink) : new MeshCoreClient(t, sink)
+      await this.#client.start()
+    } catch (e) {
+      this.connectError = e instanceof Error ? e.message : String(e)
+      this.connecting = null
+      await this.#teardown()
+    }
+  }
+
+  get isDemo() {
+    return !this.#client
+  }
+
+  #sink(t: SerialTransport): RadioSink {
+    const radioKey = () => this.session?.info.nodeId ?? ''
+    const persist = (m: Message) => {
+      if (radioKey()) void saveMessage(radioKey(), m).catch(() => {})
+    }
+    return {
+      info: (info, caps) => {
+        this.session = { info, caps: { ...capabilitiesFor(info.protocol), ...caps }, transport: t.label }
+      },
+      progress: (text) => {
+        if (this.connecting !== null) this.connecting = text
+      },
+      node: (patch) => {
+        const n = this.nodeById.get(patch.id)
+        if (n) Object.assign(n, patch)
+        else this.nodes.push({ longName: patch.id, shortName: '?', kind: 'client', ...patch })
+      },
+      removeNode: (id) => {
+        this.nodes = this.nodes.filter((n) => n.id !== id)
+      },
+      channels: (list) => {
+        this.channels = list
+      },
+      message: (m) => {
+        if (this.messages.some((x) => x.id === m.id)) return
+        this.messages.push(m)
+        persist(m)
+        const peer = m.thread.slice(3)
+        if (m.thread.startsWith('dm:') && !this.dmPeers.includes(peer)) this.dmPeers = [peer, ...this.dmPeers]
+        if (this.activeThread === m.thread && this.view === 'messages') this.markRead(m.thread)
+      },
+      updateMessage: (id, patch) => {
+        const m = this.messages.find((x) => x.id === id)
+        if (!m) return
+        Object.assign(m, patch)
+        persist(m)
+      },
+      heard: (nodeId, ts, channel) => {
+        if (channel !== undefined) this.#heardOn(`ch:${channel}`, nodeId, ts)
+      },
+      traceroute: (r) => {
+        this.traceroutes[r.nodeId] = r
+        delete this.busy[r.nodeId]
+      },
+      log: (e) => this.#log(e),
+      ready: async () => {
+        const history = await loadMessages(radioKey()).catch(() => [] as Message[])
+        const ids = new Set(this.messages.map((m) => m.id))
+        this.messages = [...history.filter((m) => !ids.has(m.id)), ...this.messages].sort((a, b) => a.ts - b.ts)
+        const dms = this.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3))
+        this.dmPeers = [...new Set(dms)]
+        this.lastRead = Object.fromEntries([...this.byThread.keys()].map((k) => [k, Date.now()]))
+        this.view = 'messages'
+        this.activeThread = this.channels[0] ? `ch:${this.channels[0].index}` : null
+        this.selectedNode = null
+        this.connecting = null
+        this.#stopTimers()
+        this.#timers.push(setInterval(() => (this.now = Date.now()), 1000))
+      },
+      closed: (reason) => {
+        if (this.#transport !== t) return
+        this.#log({ dir: 'info', kind: 'transport', summary: `closed${reason ? `: ${reason}` : ''}` })
+        if (this.session && reason) this.connectError = `Connection lost: ${reason}`
+        void this.#teardown()
+      },
+    }
+  }
+
+  async #teardown() {
+    const c = this.#client
+    const t = this.#transport
+    this.#client = null
+    this.#transport = null
+    this.#reset()
+    await c?.close().catch(() => {})
+    await t?.close().catch(() => {})
+  }
+
+  #reset() {
     this.#stopTimers()
     this.session = null
     this.nodes = []
     this.channels = []
     this.messages = []
     this.dmPeers = []
+    this.traceroutes = {}
+    this.busy = {}
+    this.channelHeard = {}
+  }
+
+  disconnect() {
+    void this.#teardown()
+  }
+
+  #log(e: Omit<LogEntry, 'ts'>) {
+    this.log.push({ ts: Date.now(), ...e })
+    if (this.log.length > LOG_MAX) this.log.splice(0, this.log.length - LOG_MAX)
   }
 
   pushLog(text: string) {
-    this.log = [...this.log.slice(-199), { ts: Date.now(), text }]
+    this.#log({ dir: 'info', kind: 'demo', summary: text })
   }
 
   markRead(thread: ThreadKey) {
@@ -178,8 +312,18 @@ class AppState {
 
   send(thread: ThreadKey, text: string) {
     const id = `local-${Date.now()}`
-    this.messages.push({ id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0 })
+    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0 }
+    this.messages.push(msg)
     this.markRead(thread)
+    if (this.#client) {
+      void saveMessage(this.session!.info.nodeId, msg).catch(() => {})
+      this.#client.sendText(thread, text, id).catch((e) => {
+        const m = this.messages.find((x) => x.id === id)
+        if (m) Object.assign(m, { status: 'failed', settled: true })
+        this.#log({ dir: 'error', kind: 'send', summary: String(e) })
+      })
+      return
+    }
     const isDm = thread.startsWith('dm:')
     // Updates are dropped if the message is gone (e.g. after disconnect).
     const later = (ms: number, fn: (m: Message) => void) =>
@@ -201,10 +345,22 @@ class AppState {
     })
   }
 
-  /** Demo implementations of node actions. */
   runAction(action: string, nodeId: string) {
     const node = this.nodeById.get(nodeId)
     if (!node) return
+    if (action === 'dm') return this.openDm(nodeId)
+    if (this.#client) {
+      if (action === 'traceroute' || action === 'path-discovery') {
+        this.busy[nodeId] = action
+        setTimeout(() => delete this.busy[nodeId], 60_000)
+      }
+      this.#client.action(action, nodeId).catch((e) => {
+        delete this.busy[nodeId]
+        this.#log({ dir: 'error', kind: action, summary: String(e) })
+      })
+      return
+    }
+    // Demo implementations.
     switch (action) {
       case 'advert-zero':
         this.pushLog('Advert sent (zero hop)')

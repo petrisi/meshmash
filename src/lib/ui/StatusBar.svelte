@@ -2,7 +2,8 @@
   import { clock } from '../format'
   import { app } from '../state.svelte'
 
-  const last = $derived(app.log.at(-1))
+  // Most recent entry worth showing: skip raw traffic.
+  const last = $derived(app.log.findLast((e) => e.dir === 'info' || e.dir === 'error'))
 </script>
 
 <footer>
@@ -10,8 +11,10 @@
   <span class="sep"></span>
   {#if last}
     <span class="faint mono">{clock(last.ts)}</span>
-    <span>{last.text}</span>
+    <span class:poor={last.dir === 'error'}>{last.summary}</span>
   {/if}
+  <span class="spacer"></span>
+  <button class="ghost" onclick={() => (app.view = 'log')}>{app.log.length} log entries</button>
 </footer>
 
 <style>
@@ -32,5 +35,13 @@
     width: 1px;
     height: 12px;
     background: var(--border);
+  }
+  .spacer {
+    flex: 1;
+  }
+  button {
+    padding: 0 6px;
+    font-size: 11px;
+    color: var(--muted);
   }
 </style>

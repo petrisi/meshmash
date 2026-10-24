@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { clock, dayLabel, snrClass } from '../../format'
+  import { clock, dayLabel, initials, snrClass } from '../../format'
   import type { Message, ThreadKey } from '../../model/types'
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
@@ -86,8 +86,8 @@
         <span class="who">
           {#if !(continues(prev, m) && !newDay(prev, m))}
             <button class="ghost sender" onclick={() => n && app.showNode(n.id)}>
-              <Badge id={m.from} label={n?.shortName ?? '?'} size={18} />
-              <span class="nm">{mine ? 'You' : (n?.longName ?? m.from)}</span>
+              <Badge id={m.from} label={n?.shortName ?? initials(m.fromName ?? '?')} size={18} />
+              <span class="nm">{mine ? 'You' : (n?.longName ?? m.fromName ?? m.from)}</span>
             </button>
           {/if}
         </span>

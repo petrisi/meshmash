@@ -26,6 +26,8 @@ export interface MeshNode {
   longName: string
   shortName: string
   kind: NodeKind
+  /** Protocol-specific role name, e.g. Meshtastic "ROUTER_LATE". */
+  role?: string
   hwModel?: string
   publicKey?: string
   /** Epoch ms. */
@@ -45,6 +47,7 @@ export interface MeshNode {
   favorite?: boolean
   /** Meshtastic: packets from this node are dropped by our radio. */
   ignored?: boolean
+  viaMqtt?: boolean
 }
 
 export type ChannelKind = 'primary' | 'secondary' | 'public' | 'hashtag' | 'private'
@@ -71,6 +74,8 @@ export interface Message {
   id: string
   thread: ThreadKey
   from: string
+  /** Sender name when `from` is not a known node (MeshCore channel messages). */
+  fromName?: string
   text: string
   ts: number
   status: MessageStatus
