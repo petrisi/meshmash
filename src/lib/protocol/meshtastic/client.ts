@@ -50,6 +50,9 @@ const ROLE_KIND: Record<string, NodeKind> = {
 }
 
 /** "LONG_FAST" → "LongFast", the name firmware uses for an unnamed primary channel. */
+/** Bandwidth codes the firmware maps to fractional kHz. */
+const BANDWIDTH_KHZ: Record<number, number> = { 31: 31.25, 62: 62.5, 200: 203.125, 400: 406.25, 800: 812.5, 1600: 1625 }
+
 function presetChannelName(preset?: number) {
   const n = MODEM_PRESET[preset ?? 0] ?? 'LONG_FAST'
   return n
@@ -218,7 +221,11 @@ export class MeshtasticClient implements RadioClient {
 
   private onConfigComplete() {
     const self = this.nodes.get(this.myNum)
-    const preset = this.lora.usePreset !== false ? MODEM_PRESET[this.lora.modemPreset ?? 0] : 'custom'
+    // proto3 omits false, so a missing use_preset means custom modem settings.
+    const l = this.lora
+    const preset = l.usePreset
+      ? (MODEM_PRESET[l.modemPreset ?? 0] ?? `preset ${l.modemPreset}`)
+      : `BW${BANDWIDTH_KHZ[l.bandwidth ?? 0] ?? l.bandwidth} SF${l.spreadFactor} CR4/${l.codingRate}`
     const info: RadioInfo = {
       protocol: 'meshtastic',
       firmware: this.metadata.firmwareVersion ?? '?',
