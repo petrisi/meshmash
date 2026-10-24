@@ -6,6 +6,11 @@ export function capabilitiesFor(protocol: Protocol): Capabilities {
     : { maxChannels: 40, maxNameLen: 31, maxShortNameLen: 2, messageMaxBytes: 133 }
 }
 
+/** How long after sending we keep counting rebroadcasts. */
+export const REPEAT_WINDOW_MS = 30_000
+/** Rebroadcasts needed within the window for a green tick. */
+export const REPEAT_OK = 2
+
 export interface NodeAction {
   id: string
   label: string
@@ -54,8 +59,18 @@ const MC_BY_KIND: Partial<Record<NodeKind, NodeAction[]>> = {
   ],
 }
 
+/** Radio-level actions, shown in the top bar and on the own node. */
+export function radioActions(protocol: Protocol): NodeAction[] {
+  return protocol === 'meshcore'
+    ? [
+        { id: 'advert-zero', label: 'Advert (zero hop)' },
+        { id: 'advert-flood', label: 'Advert (flood)' },
+      ]
+    : [{ id: 'send-nodeinfo', label: 'Send node info' }]
+}
+
 export function nodeActions(protocol: Protocol, node: MeshNode, isSelf: boolean): NodeAction[] {
-  if (isSelf) return [{ id: 'configure', label: 'Configure radio' }]
+  if (isSelf) return [...radioActions(protocol), { id: 'configure', label: 'Configure radio' }]
   if (protocol === 'meshtastic') return MT_PEER
   return MC_BY_KIND[node.kind] ?? MC_BY_KIND.chat!
 }

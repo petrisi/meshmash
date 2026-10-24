@@ -62,7 +62,7 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+  font: 13px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji';
   -webkit-font-smoothing: antialiased;
 }
 
@@ -120,7 +120,7 @@ textarea:focus {
 }
 
 .mono {
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji';
   font-size: 12px;
 }
 .muted {
@@ -181,4 +181,18 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Briefly highlights a node that was just heard. Applied to a freshly keyed element. */
+.heard-flash {
+  animation: heard-flash 1.6s ease-out;
+}
+@keyframes heard-flash {
+  0% {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  100% {
+    background: transparent;
+  }
 }

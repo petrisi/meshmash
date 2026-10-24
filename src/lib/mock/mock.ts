@@ -8,6 +8,7 @@ import type {
   RadioInfo,
   ThreadKey,
 } from '../model/types'
+import { initials } from '../format'
 
 function rng(seed: number) {
   return () => {
@@ -23,6 +24,7 @@ const PLACES = [
 const THINGS = [
   'Relay', 'Base', 'Rover', 'Node', 'Station', 'Mobile', 'Camp', 'Roof', 'Car', 'Hut', 'Gate', 'Beacon',
 ]
+const EMOJIS = ['📡', '🏔️', '🐻', '⛺', '🚐', '🌲', '🛰️', '🦊', '⚡', '🏠', '👨‍👩‍👧']
 const MT_HW = [
   'HELTEC_V3', 'HELTEC_V4', 'T_BEAM', 'RAK4631', 'T_ECHO', 'STATION_G2', 'SEEED_XIAO_S3',
   'TRACKER_T1000_E', 'HELTEC_WIRELESS_PAPER', 'T_DECK',
@@ -38,6 +40,7 @@ const CHAT = [
 ]
 
 const HOUR = 3_600_000
+const HOP_STARTS = [3, 3, 3, 3, 4, 5, 7]
 
 function hex(r: () => number, n: number) {
   let s = ''
@@ -120,6 +123,9 @@ export function mockSession(protocol: Protocol): MockSession {
     let ln = name(r)
     while (used.has(ln)) ln = `${name(r)} ${Math.floor(r() * 90 + 10)}`
     used.add(ln)
+    // Some names carry emoji, as real ones often do.
+    const emoji = r() < 0.15 ? EMOJIS[Math.floor(r() * EMOJIS.length)] : undefined
+    if (emoji) ln = r() < 0.5 ? `${emoji} ${ln}` : `${ln} ${emoji}`
     const kind = (isMt ? mtKinds : mcKinds)[Math.floor(r() * (isMt ? mtKinds.length : mcKinds.length))]
     const age = r() < 0.5 ? r() * 2 * HOUR : r() * 96 * HOUR
     const hops = r() < 0.25 ? 0 : Math.floor(r() * 6)
@@ -127,7 +133,7 @@ export function mockSession(protocol: Protocol): MockSession {
     nodes.push({
       id: isMt ? `!${hex(r, 8)}` : hex(r, 12),
       longName: kind === 'room' ? `${ln.split(' ')[0]} Chat Room` : ln,
-      shortName: short(ln, isMt ? 4 : 2),
+      shortName: isMt ? (emoji && r() < 0.6 ? emoji : short(ln.replace(emoji ?? '', '').trim(), 4)) : initials(ln),
       kind,
       hwModel: isMt ? MT_HW[Math.floor(r() * MT_HW.length)] : MC_HW[Math.floor(r() * MC_HW.length)],
       publicKey: hex(r, 64),
@@ -174,7 +180,7 @@ export function mockSession(protocol: Protocol): MockSession {
   const addThread = (thread: ThreadKey, n: number, participants: MeshNode[]) => {
     let t = now - n * 0.4 * HOUR - r() * HOUR
     for (let i = 0; i < n; i++) {
-      t += r() * 0.8 * HOUR
+      t += r() * 0.6 * HOUR
       const mine = r() < 0.25
       const from = mine ? self : participants[Math.floor(r() * participants.length)]
       messages.push({
@@ -183,9 +189,13 @@ export function mockSession(protocol: Protocol): MockSession {
         from: from.id,
         text: CHAT[Math.floor(r() * CHAT.length)],
         ts: Math.min(t, now - 60_000),
-        status: mine ? (r() < 0.85 ? 'acked' : 'failed') : 'received',
+        status: mine ? (thread.startsWith('dm:') && r() < 0.85 ? 'acked' : 'sent') : 'received',
         hops: mine ? undefined : from.hops,
+        hopStart: mine || !isMt ? undefined : Math.max(from.hops ?? 0, HOP_STARTS[Math.floor(r() * HOP_STARTS.length)]),
         snr: mine ? undefined : Math.round((r() * 20 - 14) * 4) / 4,
+        rssi: mine || !isMt ? undefined : Math.round(-128 + r() * 55),
+        repeats: mine ? Math.floor(r() * 5) : undefined,
+        settled: mine ? true : undefined,
       })
     }
   }

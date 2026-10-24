@@ -35,7 +35,7 @@
         <span class="top">
           <span class="name" class:unread={u}>{ch.kind === 'hashtag' ? ch.name.slice(1) : ch.name}</span>
           {#if ch.muted}<span class="faint small">muted</span>{/if}
-          <span class="time faint">{ago(lastOf(k)?.ts)}</span>
+          <span class="time faint">{ago(lastOf(k)?.ts, app.now)}</span>
         </span>
         <span class="preview muted">{preview(k)}</span>
       </span>
@@ -55,7 +55,7 @@
       <span class="main">
         <span class="top">
           <span class="name" class:unread={u}>{d.node?.longName ?? d.id}</span>
-          <span class="time faint">{ago(d.last?.ts)}</span>
+          <span class="time faint">{ago(d.last?.ts, app.now)}</span>
         </span>
         <span class="preview muted">{preview(k)}</span>
       </span>

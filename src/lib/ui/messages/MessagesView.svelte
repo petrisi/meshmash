@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { flip } from 'svelte/animate'
+  import { ago } from '../../format'
   import { app } from '../../state.svelte'
   import NodeDetail from '../nodes/NodeDetail.svelte'
   import Conversation from './Conversation.svelte'
@@ -10,12 +12,17 @@
     thread?.startsWith('ch:') ? app.channels.find((c) => `ch:${c.index}` === thread) : undefined,
   )
 
-  // Senders heard on the active channel, most recent first.
+  let heardSort = $state<'recent' | 'alpha'>('recent')
+
+  // Nodes that have posted in the active channel, with their last-heard time (any packet).
   const participants = $derived.by(() => {
     if (!channel || !thread) return []
-    const seen = new Map<string, number>()
-    for (const m of app.byThread.get(thread) ?? []) if (m.from !== app.selfId) seen.set(m.from, m.ts)
-    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => app.nodeById.get(id)).filter((n) => !!n)
+    const ids = new Set<string>()
+    for (const m of app.byThread.get(thread) ?? []) if (m.from !== app.selfId) ids.add(m.from)
+    const list = [...ids].map((id) => app.nodeById.get(id)).filter((n) => !!n)
+    return heardSort === 'alpha'
+      ? list.sort((a, b) => a.longName.localeCompare(b.longName, undefined, { sensitivity: 'base' }))
+      : list.sort((a, b) => (b.lastHeard ?? 0) - (a.lastHeard ?? 0))
   })
 </script>
 
@@ -42,13 +49,28 @@
         <dt>Encryption</dt><dd>{channel.encryption}</dd>
         <dt>Notifications</dt><dd>{channel.muted ? 'muted' : 'on'}</dd>
       </dl>
-      <div class="section"><span>Heard in channel</span><span class="faint">{participants.length}</span></div>
+      <div class="section">
+        <span>Heard in channel <span class="faint">{participants.length}</span></span>
+        <span class="seg">
+          <button class:on={heardSort === 'recent'} onclick={() => (heardSort = 'recent')}>Last heard</button>
+          <button class:on={heardSort === 'alpha'} onclick={() => (heardSort = 'alpha')}>A–Z</button>
+        </span>
+      </div>
       <div class="people">
         {#each participants as n (n.id)}
-          <button class="ghost person" onclick={() => app.showNode(n.id)}>
-            <span class="mono sn">{n.shortName}</span>
-            <span class="pn">{n.longName}</span>
-          </button>
+          <div animate:flip={{ duration: 300 }}>
+            {#key n.lastHeard}
+              <button
+                class="ghost person"
+                class:heard-flash={Date.now() - (n.lastHeard ?? 0) < 1500}
+                onclick={() => app.showNode(n.id)}
+              >
+                <span class="mono sn">{n.shortName}</span>
+                <span class="pn">{n.longName}</span>
+                <span class="mono ago">{ago(n.lastHeard, app.now)}</span>
+              </button>
+            {/key}
+          </div>
         {/each}
       </div>
     {/if}
@@ -85,6 +107,7 @@
   }
   .person {
     display: flex;
+    align-items: baseline;
     gap: 8px;
     width: 100%;
     padding: 2px 6px;
@@ -92,8 +115,39 @@
     text-align: left;
   }
   .sn {
-    width: 40px;
+    flex: none;
+    width: calc(4ch + 4px);
+    overflow: hidden;
+    white-space: nowrap;
     color: var(--muted);
+  }
+  .ago {
+    margin-left: auto;
+    flex: none;
+    width: 4ch;
+    text-align: right;
+    color: var(--faint);
+  }
+  .seg {
+    display: inline-flex;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .seg button {
+    padding: 0 7px;
+    font-size: 11px;
+    border-radius: 0;
+  }
+  .seg button:first-child {
+    border-radius: 4px 0 0 4px;
+  }
+  .seg button:last-child {
+    border-radius: 0 4px 4px 0;
+    border-left: none;
+  }
+  .seg button.on {
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .pn {
     overflow: hidden;

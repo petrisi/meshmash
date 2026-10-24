@@ -45,6 +45,24 @@ export function km(d: number | undefined): string {
   return d < 10 ? d.toFixed(1) : Math.round(d).toString()
 }
 
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/** User-perceived characters; an emoji with modifiers/ZWJ counts as one. */
+export function graphemes(s: string): string[] {
+  return Array.from(segmenter.segment(s), (g) => g.segment)
+}
+
+const EMOJI = /\p{Extended_Pictographic}/u
+
+/** Badge text for protocols without short names: leading emoji, else initials. */
+export function initials(name: string, max = 2): string {
+  const g = graphemes(name.trim())
+  if (g.length && EMOJI.test(g[0])) return g[0]
+  const words = name.split(/\s+/).filter((w) => w && !EMOJI.test(w))
+  const s = words.length > 1 ? words.map((w) => graphemes(w)[0]).join('') : (words[0] ?? '?')
+  return graphemes(s).slice(0, max).join('').toUpperCase()
+}
+
 /** Stable hue per node id for badges. */
 export function hue(id: string): number {
   let h = 0

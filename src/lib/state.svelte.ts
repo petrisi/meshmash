@@ -1,4 +1,4 @@
-import { capabilitiesFor } from './model/capabilities'
+import { capabilitiesFor, REPEAT_WINDOW_MS } from './model/capabilities'
 import type {
   Capabilities,
   Channel,
@@ -34,6 +34,9 @@ class AppState {
   activeThread = $state<ThreadKey | null>(null)
   selectedNode = $state<string | null>(null)
   log = $state<{ ts: number; text: string }[]>([])
+  /** Ticks every second so relative times ("3s", "47m") stay current. */
+  now = $state(Date.now())
+  #timers: ReturnType<typeof setInterval>[] = []
 
   protocol = $derived<Protocol | null>(this.session?.info.protocol ?? null)
   selfId = $derived(this.session?.info.nodeId ?? '')
@@ -74,9 +77,51 @@ class AppState {
     this.log = []
     this.markRead('ch:0')
     this.pushLog(`Connected (demo) · ${protocol} · ${s.nodes.length} nodes · ${s.channels.length} channels`)
+    this.#stopTimers()
+    this.#timers.push(setInterval(() => (this.now = Date.now()), 1000))
+    this.#scheduleLive()
+  }
+
+  #stopTimers() {
+    this.#timers.forEach(clearInterval)
+    this.#timers = []
+  }
+
+  /** Demo: simulate mesh traffic — nodes being heard and occasional messages. */
+  #scheduleLive() {
+    const t = setTimeout(() => {
+      if (!this.session) return
+      const peers = this.nodes.filter((n) => n.id !== this.selfId)
+      const n = peers[Math.floor(Math.random() * peers.length)]
+      n.lastHeard = Date.now()
+      if (n.hops === 0) n.snr = Math.round((Math.random() * 22 - 15) * 4) / 4
+      if (Math.random() < 0.3 && (this.protocol === 'meshtastic' || n.kind === 'chat')) {
+        const ch = this.channels[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * this.channels.length)]
+        const isMt = this.protocol === 'meshtastic'
+        const hops = n.hops ?? 1
+        this.messages.push({
+          id: `rx-${Date.now()}`,
+          thread: `ch:${ch.index}`,
+          from: n.id,
+          text: ['copy that', 'anyone near the bay?', 'test 1 2 3', 'good morning mesh', 'heard you loud and clear'][
+            Math.floor(Math.random() * 5)
+          ],
+          ts: Date.now(),
+          status: 'received',
+          hops,
+          hopStart: isMt ? Math.max(hops, 3) : undefined,
+          snr: Math.round((Math.random() * 20 - 14) * 4) / 4,
+          rssi: isMt ? Math.round(-128 + Math.random() * 55) : undefined,
+        })
+        if (this.activeThread === `ch:${ch.index}` && this.view === 'messages') this.markRead(`ch:${ch.index}`)
+      }
+      this.#scheduleLive()
+    }, 1500 + Math.random() * 3500)
+    this.#timers.push(t)
   }
 
   disconnect() {
+    this.#stopTimers()
     this.session = null
     this.nodes = []
     this.channels = []
@@ -114,19 +159,27 @@ class AppState {
   }
 
   send(thread: ThreadKey, text: string) {
-    const msg: Message = {
-      id: `local-${Date.now()}`,
-      thread,
-      from: this.selfId,
-      text,
-      ts: Date.now(),
-      status: 'pending',
-    }
-    this.messages.push(msg)
+    const id = `local-${Date.now()}`
+    this.messages.push({ id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0 })
     this.markRead(thread)
-    const idx = this.messages.length - 1
-    setTimeout(() => (this.messages[idx].status = 'sent'), 400)
-    setTimeout(() => (this.messages[idx].status = Math.random() < 0.85 ? 'acked' : 'failed'), 2500)
+    const isDm = thread.startsWith('dm:')
+    // Updates are dropped if the message is gone (e.g. after disconnect).
+    const later = (ms: number, fn: (m: Message) => void) =>
+      setTimeout(() => {
+        const m = this.messages.find((x) => x.id === id)
+        if (m) fn(m)
+      }, ms)
+
+    // Demo: radio accepts, then rebroadcasts trickle in during the window.
+    later(500, (m) => (m.status = 'sent'))
+    const repeats = Math.floor(Math.random() * 5)
+    for (let i = 0; i < repeats; i++)
+      later(1200 + Math.random() * (REPEAT_WINDOW_MS - 3000), (m) => (m.repeats = (m.repeats ?? 0) + 1))
+    if (isDm && Math.random() < 0.8) later(2500 + Math.random() * 8000, (m) => (m.status = 'acked'))
+    later(REPEAT_WINDOW_MS, (m) => {
+      m.settled = true
+      if (isDm && m.status !== 'acked') m.status = 'failed'
+    })
   }
 
   /** Demo implementations of node actions. */
@@ -134,6 +187,15 @@ class AppState {
     const node = this.nodeById.get(nodeId)
     if (!node) return
     switch (action) {
+      case 'advert-zero':
+        this.pushLog('Advert sent (zero hop)')
+        return
+      case 'advert-flood':
+        this.pushLog('Advert sent (flood)')
+        return
+      case 'send-nodeinfo':
+        this.pushLog('Node info broadcast')
+        return
       case 'dm':
         this.openDm(nodeId)
         return

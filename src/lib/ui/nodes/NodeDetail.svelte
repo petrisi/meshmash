@@ -43,7 +43,7 @@
   </div>
 
   {#if tr}
-    <div class="section"><span>Route</span><span class="faint">{ago(tr.ts)} ago</span></div>
+    <div class="section"><span>Route</span><span class="faint">{ago(tr.ts, app.now)} ago</span></div>
     <div class="route">
       <div class="dir muted">Towards</div>
       <ol>
@@ -74,7 +74,7 @@
     <dt>Hardware</dt><dd>{node.hwModel ?? '—'}</dd>
     <dt>Short name</dt><dd class="mono">{node.shortName}</dd>
     {#if node.publicKey}<dt>Public key</dt><dd class="mono" title={node.publicKey}>{node.publicKey}</dd>{/if}
-    {#if !isSelf}<dt>Last heard</dt><dd>{ago(node.lastHeard)} ago</dd>{/if}
+    {#if !isSelf}<dt>Last heard</dt><dd>{ago(node.lastHeard, app.now)} ago</dd>{/if}
     {#if node.uptimeS !== undefined}<dt>Uptime</dt><dd>{uptime(node.uptimeS)}</dd>{/if}
   </dl>
 

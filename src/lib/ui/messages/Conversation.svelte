@@ -4,6 +4,7 @@
   import type { Message, ThreadKey } from '../../model/types'
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
+  import Delivery from './Delivery.svelte'
 
   let { thread }: { thread: ThreadKey } = $props()
 
@@ -26,12 +27,11 @@
     return !prev || new Date(prev.ts).toDateString() !== new Date(m.ts).toDateString()
   }
 
-  const STATUS: Record<Message['status'], string> = {
-    pending: '○',
-    sent: '◐',
-    acked: '✓',
-    failed: '✕',
-    received: '',
+  const isMt = $derived(app.protocol === 'meshtastic')
+
+  function hops(m: Message) {
+    if (m.hops === undefined) return ''
+    return m.hopStart !== undefined ? `${m.hops}/${m.hopStart}` : `${m.hops}`
   }
 
   $effect(() => {
@@ -63,6 +63,16 @@
     <span class="faint count">{msgs.length} messages</span>
   </div>
 
+  <div class="colhead">
+    <div class="msg cols" class:mt={isMt}>
+      <span></span><span></span><span></span>
+      <span title={isMt ? 'hops taken / hop limit at start' : 'path length'}>hops</span>
+      <span>SNR</span>
+      {#if isMt}<span>RSSI</span>{/if}
+      <span title="rebroadcasts heard">rpt</span>
+    </div>
+  </div>
+
   <div class="scroll" bind:this={scroller}>
     {#each msgs as m, i (m.id)}
       {@const prev = msgs[i - 1]}
@@ -71,7 +81,7 @@
       {#if newDay(prev, m)}
         <div class="day"><span>{dayLabel(m.ts)}</span></div>
       {/if}
-      <div class="msg" class:mine class:cont={continues(prev, m) && !newDay(prev, m)}>
+      <div class="msg" class:mt={isMt} class:mine class:cont={continues(prev, m) && !newDay(prev, m)}>
         <span class="t mono faint">{clock(m.ts)}</span>
         <span class="who">
           {#if !(continues(prev, m) && !newDay(prev, m))}
@@ -82,11 +92,10 @@
           {/if}
         </span>
         <span class="text">{m.text}</span>
-        <span class="meta mono">
-          {#if m.hops !== undefined}<span class="faint" title="hops away">{m.hops ? `${m.hops} hop${m.hops > 1 ? 's' : ''}` : 'direct'}</span>{/if}
-          {#if m.snr !== undefined}<span class={snrClass(m.snr)} title="SNR dB">{m.snr}</span>{/if}
-          {#if mine}<span class="st {m.status}" title={m.status}>{STATUS[m.status]}</span>{/if}
-        </span>
+        <span class="c mono muted">{hops(m)}</span>
+        <span class="c mono {snrClass(m.snr)}">{m.snr ?? ''}</span>
+        {#if isMt}<span class="c mono muted">{m.rssi ?? ''}</span>{/if}
+        <span class="c mono">{#if mine}<Delivery {m} />{/if}</span>
       </div>
     {/each}
   </div>
@@ -130,6 +139,7 @@
   .scroll {
     flex: 1;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding: 6px 0 10px;
     display: flex;
     flex-direction: column;
@@ -154,11 +164,41 @@
   }
   .msg {
     display: grid;
-    grid-template-columns: 38px 190px 1fr auto;
+    /* time | sender | text | hops | snr | rpt  (+ rssi for Meshtastic) */
+    grid-template-columns: 38px 190px 1fr 40px 48px 40px;
     gap: 8px;
     align-items: baseline;
     padding: 3px 14px 1px;
     border-left: 2px solid transparent;
+  }
+  .msg.mt {
+    grid-template-columns: 38px 190px 1fr 40px 48px 40px 40px;
+  }
+  .colhead {
+    overflow-y: hidden;
+    scrollbar-gutter: stable;
+  }
+  .msg.cols {
+    margin: 0;
+    padding-top: 4px;
+    padding-bottom: 3px;
+    background: var(--bg);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    border-bottom: 1px solid var(--border);
+  }
+  .msg.cols > span:nth-child(n + 4) {
+    text-align: right;
+  }
+  .msg.cols:hover {
+    background: var(--bg);
+  }
+  .c {
+    font-size: 11px;
+    text-align: right;
+    white-space: nowrap;
   }
   .msg:not(.cont) {
     margin-top: 4px;
@@ -206,21 +246,6 @@
   .text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  .meta {
-    display: flex;
-    gap: 8px;
-    font-size: 11px;
-  }
-  .st.acked {
-    color: var(--good);
-  }
-  .st.failed {
-    color: var(--danger);
-  }
-  .st.pending,
-  .st.sent {
-    color: var(--muted);
   }
   form {
     display: flex;

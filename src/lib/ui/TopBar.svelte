@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { radioActions } from '../model/capabilities'
   import { app } from '../state.svelte'
 
   const s = $derived(app.session!)
@@ -23,6 +24,9 @@
   <span class="muted">{info.hwModel}</span>
   <span class="muted">{radioSummary}</span>
   <span class="spacer"></span>
+  {#each radioActions(info.protocol) as a (a.id)}
+    <button onclick={() => app.runAction(a.id, info.nodeId)}>{a.label}</button>
+  {/each}
   <span class="muted">{app.nodes.length} nodes</span>
   {#if info.batteryPct !== undefined}
     <span class="muted">Batt {info.batteryPct}%{info.voltage ? ` · ${info.voltage.toFixed(2)} V` : ''}</span>

@@ -56,6 +56,10 @@ export interface Channel {
   muted?: boolean
 }
 
+/**
+ * Outgoing: pending (queued to radio) → sent (radio transmitted) → acked (DM recipient
+ * confirmed) | failed. Incoming messages are "received".
+ */
 export type MessageStatus = 'pending' | 'sent' | 'acked' | 'failed' | 'received'
 
 /** Thread keys: "ch:<index>" or "dm:<nodeId>". */
@@ -68,9 +72,16 @@ export interface Message {
   text: string
   ts: number
   status: MessageStatus
+  /** Hops taken to reach us (Meshtastic: hop_start - hop_limit; MeshCore: path length). */
   hops?: number
+  /** Meshtastic only: sender's initial hop limit. */
+  hopStart?: number
   snr?: number
   rssi?: number
+  /** Outgoing: rebroadcasts of this packet heard by our radio. */
+  repeats?: number
+  /** Outgoing: the repeat-listening window has closed. */
+  settled?: boolean
 }
 
 export interface RadioParams {

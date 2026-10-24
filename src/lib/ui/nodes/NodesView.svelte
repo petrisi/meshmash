@@ -146,14 +146,14 @@
             >
               <td class="b"><Badge id={n.id} label={n.shortName} size={20} /></td>
               <td class="name">
-                <span class="ln">{n.longName}</span>
+                {#key n.lastHeard}<span class="ln" class:heard-flash={!isSelf && Date.now() - (n.lastHeard ?? 0) < 1500}>{n.longName}</span>{/key}
                 {#if isSelf}<span class="you">YOU</span>{/if}
                 {#if n.favorite}<span class="star">★</span>{/if}
                 <span class="mono faint id">{n.id}</span>
               </td>
               <td class="muted">{KIND_LABEL[n.kind]}</td>
               <td class="muted hw">{n.hwModel ?? ''}</td>
-              <td class="num">{isSelf ? '' : ago(n.lastHeard)}</td>
+              <td class="num">{isSelf ? '' : ago(n.lastHeard, app.now)}</td>
               <td class="num">{isSelf ? '' : (n.hops ?? '—')}</td>
               <td class="num {snrClass(n.snr)}">{n.snr ?? ''}</td>
               <td class="num">{n.rssi ?? ''}</td>
