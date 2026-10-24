@@ -1,0 +1,184 @@
+/* Theme tokens. data-theme is set from the connected radio's protocol. */
+:root,
+[data-theme='neutral'] {
+  --bg: #121417;
+  --panel: #181b1f;
+  --panel-2: #1f2328;
+  --hover: #262b31;
+  --border: #2b3036;
+  --text: #e3e6ea;
+  --muted: #8a929b;
+  --faint: #5d646c;
+  --accent: #c9ced4;
+  --accent-ink: #121417;
+  --accent-soft: rgba(201, 206, 212, 0.1);
+  --good: #5fd38d;
+  --fair: #e7b84a;
+  --poor: #ef6b6b;
+  --danger: #ef6b6b;
+  --own: rgba(201, 206, 212, 0.06);
+}
+
+/* Meshtastic-style: green on charcoal. */
+[data-theme='meshtastic'] {
+  --bg: #141618;
+  --panel: #1a1d20;
+  --panel-2: #212529;
+  --hover: #283029;
+  --border: #2c3236;
+  --text: #e4e8e5;
+  --muted: #8b958f;
+  --faint: #5b645e;
+  --accent: #67ea94;
+  --accent-ink: #0c2216;
+  --accent-soft: rgba(103, 234, 148, 0.12);
+  --own: rgba(103, 234, 148, 0.06);
+}
+
+/* MeshCore-style: blue on deep navy. */
+[data-theme='meshcore'] {
+  --bg: #0e1320;
+  --panel: #131a2a;
+  --panel-2: #192235;
+  --hover: #1f2a42;
+  --border: #253048;
+  --text: #e2e8f5;
+  --muted: #8794b1;
+  --faint: #56617c;
+  --accent: #4ea4ff;
+  --accent-ink: #061427;
+  --accent-soft: rgba(78, 164, 255, 0.13);
+  --own: rgba(78, 164, 255, 0.07);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--hover);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: var(--accent);
+}
+button.danger {
+  color: var(--danger);
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  outline: none;
+}
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+}
+.muted {
+  color: var(--muted);
+}
+.faint {
+  color: var(--faint);
+}
+.good {
+  color: var(--good);
+}
+.fair {
+  color: var(--fair);
+}
+.poor {
+  color: var(--poor);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Section header used in side panels */
+.section {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 8px 10px 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Key/value grid used in info panels */
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  padding: 0 12px 8px;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
