@@ -491,6 +491,7 @@ export class MeshCoreClient implements RadioClient {
     const now = Date.now()
     // Sender clocks are unreliable; never place a message in the future.
     const ts = Math.min(m.senderTs * 1000, now)
+    // 0xFF here means the message came by a direct route, so the hop count is not known.
     const hops = pathHops(m.pathLen)
 
     if (isChannel) {

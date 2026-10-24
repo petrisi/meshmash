@@ -198,7 +198,7 @@ export function decodeSelfInfo(f: Uint8Array): SelfInfo {
   r.u8()
   const s = {
     advType: r.u8(),
-    txPower: r.u8(),
+    txPower: r.i8(), // can be negative
     maxTxPower: r.u8(),
     publicKey: r.bytes(PUB_KEY_SIZE),
     lat: r.i32() / 1e6,
