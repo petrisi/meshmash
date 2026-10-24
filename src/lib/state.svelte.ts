@@ -7,6 +7,7 @@ import type {
   Message,
   Protocol,
   RadioInfo,
+  RemoteData,
   ThreadKey,
   TracerouteResult,
 } from './model/types'
@@ -26,10 +27,10 @@ let localSeq = 0
 /** Node actions that wait for an answer from the other node. */
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
-  'path-discovery', 'trace', 'req-status', 'login', 'req-neighbours',
+  'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
 ])
 /** Covers slow serial polling plus a multi-hop round trip. */
-const REQUEST_TIMEOUT_MS = 60_000
+const REQUEST_TIMEOUT_MS = 90_000
 
 export interface Session {
   info: RadioInfo
@@ -50,6 +51,7 @@ class AppState {
   busy = $state<Record<string, string>>({})
   /** Latest result per node id and action. */
   results = $state<Record<string, Record<string, ActionResult>>>({})
+  remote = $state<Record<string, RemoteData>>({})
   /**
    * Per channel: node id → last time heard on that channel. Meshtastic counts any packet
    * (every packet carries a channel); MeshCore only channel messages.
@@ -250,6 +252,13 @@ class AppState {
         if (a) this.#result(r.nodeId, a, 'ok', 'Route received')
       },
       actionResult: (nodeId, action, ok, text) => this.#result(nodeId, action, ok ? 'ok' : 'failed', text),
+      remote: (nodeId, patch) => {
+        this.remote[nodeId] = { ...this.remote[nodeId], ...patch }
+      },
+      cliLine: (nodeId, dir, text) => {
+        const r = (this.remote[nodeId] ??= {})
+        r.cli = [...(r.cli ?? []), { ts: Date.now(), dir, text }].slice(-200)
+      },
       log: (e) => this.#log(e),
       ready: async () => {
         const history = await loadMessages(radioKey()).catch(() => [] as Message[])
@@ -296,6 +305,7 @@ class AppState {
     this.traceroutes = {}
     this.busy = {}
     this.results = {}
+    this.remote = {}
     this.channelHeard = {}
   }
 
@@ -378,6 +388,20 @@ class AppState {
     if (state === 'pending') this.busy[nodeId] = action
     else if (this.busy[nodeId] === action) delete this.busy[nodeId]
     return r
+  }
+
+  /** The password goes only to the radio; it is not stored. */
+  login(nodeId: string, password: string) {
+    if (!this.#client?.login) return
+    const r = this.#result(nodeId, 'login', 'pending')
+    setTimeout(() => {
+      if (this.results[nodeId]?.login?.ts === r.ts) this.#result(nodeId, 'login', 'failed', 'No answer')
+    }, REQUEST_TIMEOUT_MS)
+    this.#client.login(nodeId, password).catch((e) => this.#result(nodeId, 'login', 'failed', String(e?.message ?? e)))
+  }
+
+  cli(nodeId: string, text: string) {
+    this.#client?.cli?.(nodeId, text).catch((e) => this.#log({ dir: 'error', kind: 'cli', summary: String(e) }))
   }
 
   runAction(action: string, nodeId: string) {

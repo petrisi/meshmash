@@ -5,6 +5,7 @@ import type {
   Message,
   Protocol,
   RadioInfo,
+  RemoteData,
   ThreadKey,
   TracerouteResult,
 } from '../model/types'
@@ -33,6 +34,9 @@ export interface RadioSink {
   /** A packet from nodeId was heard, optionally on a channel index. */
   heard(nodeId: string, ts: number, channel?: number): void
   traceroute(r: TracerouteResult): void
+  /** Merge data fetched from a node. */
+  remote(nodeId: string, patch: Omit<RemoteData, 'cli'>): void
+  cliLine(nodeId: string, dir: 'out' | 'in', text: string): void
   /** Answer (or definite failure) for a request started by RadioClient.action. */
   actionResult(nodeId: string, action: string, ok: boolean, text?: string): void
   log(e: Omit<LogEntry, 'ts'>): void
@@ -61,4 +65,8 @@ export interface RadioClient {
   /** localId is the id the UI already gave the pending message. */
   sendText(thread: ThreadKey, text: string, localId: string): Promise<void>
   action(action: string, nodeId: string): Promise<void>
+  /** Log in to a server node; the outcome arrives as an actionResult for 'login'. */
+  login?(nodeId: string, password: string): Promise<void>
+  /** Send a CLI command to a server node we administer. */
+  cli?(nodeId: string, text: string): Promise<void>
 }

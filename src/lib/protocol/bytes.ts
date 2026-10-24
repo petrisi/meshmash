@@ -55,6 +55,11 @@ export class LeReader {
     this.pos += 2
     return v
   }
+  i16() {
+    const v = this.view.getInt16(this.pos, true)
+    this.pos += 2
+    return v
+  }
   u32() {
     const v = this.view.getUint32(this.pos, true)
     this.pos += 4
@@ -85,6 +90,10 @@ export class LeWriter {
 
   u8(v: number) {
     this.parts.push(v & 0xff)
+    return this
+  }
+  u16(v: number) {
+    this.parts.push(v & 0xff, (v >>> 8) & 0xff)
     return this
   }
   u32(v: number) {

@@ -274,6 +274,8 @@ export interface RecvMessage {
   pathLen: number
   txtType: number
   senderTs: number
+  /** Room posts: first 4 bytes (hex) of the author's public key. */
+  author?: string
   text: string
 }
 
@@ -289,8 +291,9 @@ export function decodeContactMsg(f: Uint8Array): RecvMessage {
   const pathLen = r.u8()
   const txtType = r.u8()
   const senderTs = r.u32()
-  if (txtType === TxtType.SIGNED_PLAIN) r.bytes(4)
-  return { senderPrefix, snr, pathLen, txtType, senderTs, text: new TextDecoder().decode(r.rest()) }
+  // Room server posts carry the author's key prefix.
+  const author = txtType === TxtType.SIGNED_PLAIN ? hex(r.bytes(4)) : undefined
+  return { senderPrefix, snr, pathLen, txtType, senderTs, author, text: new TextDecoder().decode(r.rest()) }
 }
 
 export function decodeChannelMsg(f: Uint8Array): RecvMessage {

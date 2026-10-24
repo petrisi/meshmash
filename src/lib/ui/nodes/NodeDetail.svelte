@@ -5,6 +5,7 @@
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
   import MiniMap, { type MapPoint } from '../MiniMap.svelte'
+  import RemotePanel from './RemotePanel.svelte'
 
   let { node, compact = false }: { node: MeshNode; compact?: boolean } = $props()
 
@@ -20,6 +21,12 @@
       .sort((a, b) => b.ts - a.ts)
       .slice(0, 4),
   )
+  let loginOpen = $state(false)
+  $effect(() => {
+    void node.id
+    loginOpen = false
+  })
+  const run = (id: string) => (id === 'login' ? (loginOpen = !loginOpen) : app.runAction(id, node.id))
   const label = (id: string) => actions.find((a) => a.id === id)?.label ?? id
   const mapPoints = $derived.by(() => {
     if (!node.position) return []
@@ -49,7 +56,7 @@
         class:primary={a.primary}
         class:danger={a.danger}
         disabled={!!busy}
-        onclick={() => app.runAction(a.id, node.id)}
+        onclick={() => run(a.id)}
       >
         {busy === a.id ? `${a.label}…` : a.label}
       </button>
@@ -68,6 +75,8 @@
       {/each}
     </ul>
   {/if}
+
+  <RemotePanel {node} bind:loginOpen />
 
   {#if tr}
     <div class="section"><span>Route</span><span class="faint">{ago(tr.ts, app.now)} ago</span></div>

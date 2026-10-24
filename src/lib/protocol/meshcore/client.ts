@@ -5,6 +5,24 @@ import type { SerialTransport } from '../../transport/serial'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { RadioClient, RadioSink } from '../types'
 import {
+  cmdBinaryReq,
+  cmdLogin,
+  cmdSendCli,
+  cmdStatusReq,
+  cmdTelemetryReq,
+  cmdTracePath,
+  decodeBinaryResponse,
+  decodeLoginSuccess,
+  decodeLpp,
+  decodeNeighbours,
+  decodeStatus,
+  decodeTraceData,
+  NEIGHBOURS_PER_PAGE,
+  neighboursReq,
+  pushPrefix,
+  ReqType,
+} from './remote'
+import {
   cmdAdvert,
   cmdAppStart,
   cmdDeviceQuery,
@@ -35,6 +53,7 @@ import {
   decodeRxLog,
   decodeSelfInfo,
   decodeSent,
+  OUT_PATH_FLOOD,
   groupTextCiphertext,
   PayloadType,
   type DeviceInfo,
@@ -89,6 +108,12 @@ export class MeshCoreClient implements RadioClient {
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
   private discoveries = new Set<string>()
   private secrets = new Map<number, Uint8Array>()
+  /**
+   * The radio matches only one outstanding remote request (login, status, telemetry, binary,
+   * path discovery); a new one replaces the old. Requests therefore run one at a time.
+   */
+  private remoteChain: Promise<unknown> = Promise.resolve()
+  private remoteWait: { codes: number[]; match: (f: Uint8Array) => boolean; done: (f: Uint8Array) => void } | null = null
   /** Our recent channel messages, matched against overheard repeats. */
   private echoes: { ct: Uint8Array; localId: string; count: number }[] = []
 
@@ -318,6 +343,12 @@ export class MeshCoreClient implements RadioClient {
   }
 
   /** Resolves path hop hashes to node ids where a repeater's key starts with the hash. */
+  private byKeyPrefix(prefixHex: string): { publicKey: Uint8Array } | undefined {
+    if (this.self && hex(this.self.publicKey).startsWith(prefixHex)) return this.self
+    for (const c of this.contacts.values()) if (hex(c.publicKey).startsWith(prefixHex)) return c
+    return undefined
+  }
+
   private resolveHops(hops: string[] | undefined): string[] {
     return (hops ?? []).map((h) => {
       let match: Contact | undefined
@@ -405,6 +436,16 @@ export class MeshCoreClient implements RadioClient {
         }
         return
       }
+      case Push.LOGIN_SUCCESS:
+      case Push.LOGIN_FAIL:
+      case Push.STATUS_RESPONSE:
+      case Push.TELEMETRY_RESPONSE:
+      case Push.BINARY_RESPONSE:
+      case Push.TRACE_DATA: {
+        const w = this.remoteWait
+        if (w && w.codes.includes(f[0]) && w.match(f)) w.done(f)
+        return
+      }
       case Push.SEND_CONFIRMED: {
         const r = new LeReader(f.subarray(1))
         const ack = r.u32()
@@ -487,7 +528,10 @@ export class MeshCoreClient implements RadioClient {
     const isDm = f[0] === Resp.CONTACT_MSG_RECV_V3 || f[0] === Resp.CONTACT_MSG_RECV
     if (!isChannel && !isDm) return
     const m: RecvMessage = isChannel ? decodeChannelMsg(f) : decodeContactMsg(f)
-    if (m.txtType === TxtType.CLI_DATA) return
+    if (m.txtType === TxtType.CLI_DATA) {
+      if (m.senderPrefix) this.sink.cliLine(hex(m.senderPrefix), 'in', m.text)
+      return
+    }
     const now = Date.now()
     // Sender clocks are unreliable; never place a message in the future.
     const ts = Math.min(m.senderTs * 1000, now)
@@ -515,10 +559,13 @@ export class MeshCoreClient implements RadioClient {
     } else {
       const from = hex(m.senderPrefix!)
       this.sink.heard(from, now)
+      // A room server relays posts from its members: the thread is the room, the sender the author.
+      const author = m.author ? this.byKeyPrefix(m.author) : undefined
       this.sink.message({
-        id: `mc-dm-${from}-${m.senderTs}`,
+        id: `mc-dm-${from}-${m.senderTs}${m.author ? `-${m.author}` : ''}`,
         thread: `dm:${from}`,
-        from,
+        from: author ? idOf(author.publicKey) : (m.author ?? from),
+        fromName: m.author && !author ? m.author : undefined,
         text: m.text,
         ts,
         status: 'received',
@@ -579,6 +626,16 @@ export class MeshCoreClient implements RadioClient {
         decodeSent(await this.expect(cmdPathDiscovery(c.publicKey), Resp.SENT))
         this.discoveries.add(id)
         return
+      case 'req-status':
+        return this.status(id, c)
+      case 'req-telemetry':
+        return this.telemetry(id, c)
+      case 'req-neighbours':
+        return this.neighbours(id, c)
+      case 'req-owner':
+        return this.owner(id, c)
+      case 'trace':
+        return this.trace(id, c)
       case 'share':
         await this.expect(cmdShareContact(c.publicKey), Resp.OK)
         return
@@ -590,6 +647,139 @@ export class MeshCoreClient implements RadioClient {
       default:
         this.sink.log({ dir: 'info', kind: 'action', summary: `${action}: not implemented yet` })
     }
+  }
+
+  // Remote requests
+
+  /**
+   * Sends a request that the radio answers with RESP_SENT, then waits for a matching push.
+   * Resolves null on timeout; a wrong password, for one, gets no answer at all.
+   */
+  private remote(
+    cmd: Uint8Array,
+    codes: number[],
+    match: (f: Uint8Array, tag: number) => boolean,
+  ): Promise<Uint8Array | null> {
+    const run = async () => {
+      const sent = decodeSent(await this.expect(cmd, Resp.SENT))
+      const timeout = Math.min(Math.max(sent.timeoutMs + 5_000, 10_000), 60_000)
+      return new Promise<Uint8Array | null>((resolve) => {
+        const timer = setTimeout(() => {
+          this.remoteWait = null
+          resolve(null)
+        }, timeout)
+        this.remoteWait = {
+          codes,
+          match: (f) => match(f, sent.tag),
+          done: (f) => {
+            clearTimeout(timer)
+            this.remoteWait = null
+            resolve(f)
+          },
+        }
+      })
+    }
+    const p = this.remoteChain.then(run)
+    this.remoteChain = p.catch(() => {})
+    return p
+  }
+
+  async login(id: string, password: string) {
+    const c = this.contact(id)
+    const f = await this.remote(cmdLogin(c.publicKey, password), [Push.LOGIN_SUCCESS, Push.LOGIN_FAIL], (f) => pushPrefix(f) === id)
+    if (!f) return this.sink.actionResult(id, 'login', false, 'No answer: wrong password, or out of reach')
+    if (f[0] === Push.LOGIN_FAIL) return this.sink.actionResult(id, 'login', false, 'Login rejected')
+    const r = decodeLoginSuccess(f)
+    this.sink.remote(id, { login: { role: r.role, ts: Date.now() } })
+    this.sink.actionResult(id, 'login', true, `Logged in as ${r.role}`)
+  }
+
+  async cli(id: string, text: string) {
+    const c = this.contact(id)
+    await this.expect(cmdSendCli(c.publicKey, text), Resp.SENT)
+    this.sink.cliLine(id, 'out', text)
+  }
+
+  private contact(id: string): Contact {
+    const c = this.contacts.get(id)
+    if (!c) throw new Error('unknown contact')
+    return c
+  }
+
+  private async status(id: string, c: Contact) {
+    const f = await this.remote(cmdStatusReq(c.publicKey), [Push.STATUS_RESPONSE], (f) => pushPrefix(f) === id)
+    if (!f) return this.sink.actionResult(id, 'req-status', false, 'No answer (log in first?)')
+    const fields = decodeStatus(f, c.type === ContactType.ROOM)
+    this.sink.remote(id, { status: { ts: Date.now(), fields } })
+    this.sink.actionResult(id, 'req-status', true, 'Status received')
+  }
+
+  private async telemetry(id: string, c: Contact) {
+    const f = await this.remote(cmdTelemetryReq(c.publicKey), [Push.TELEMETRY_RESPONSE], (f) => pushPrefix(f) === id)
+    if (!f) {
+      const hint = c.type === ContactType.CHAT ? 'not shared, or out of reach' : 'log in first?'
+      return this.sink.actionResult(id, 'req-telemetry', false, `No answer (${hint})`)
+    }
+    const readings = decodeLpp(f.subarray(8))
+    this.sink.remote(id, { telemetry: { ts: Date.now(), readings } })
+    const volts = readings.find((r) => r.channel === 1 && r.type === 116)
+    if (volts) this.sink.node({ id, voltage: parseFloat(volts.value) })
+    this.sink.actionResult(id, 'req-telemetry', true, `${readings.length} reading${readings.length === 1 ? '' : 's'}`)
+  }
+
+  private async binary(c: Contact, data: Uint8Array) {
+    const f = await this.remote(cmdBinaryReq(c.publicKey, data), [Push.BINARY_RESPONSE], (f, tag) => decodeBinaryResponse(f).tag === tag)
+    return f && decodeBinaryResponse(f).body
+  }
+
+  private async neighbours(id: string, c: Contact) {
+    const list: { id: string; heardSecsAgo: number; snr: number }[] = []
+    let total = 0
+    do {
+      const body = await this.binary(c, neighboursReq(list.length))
+      if (!body) {
+        if (!list.length) return this.sink.actionResult(id, 'req-neighbours', false, 'No answer (log in first?)')
+        break
+      }
+      const page = decodeNeighbours(body)
+      total = page.total
+      for (const n of page.list) list.push({ id: this.resolveHops([n.prefix])[0], heardSecsAgo: n.heardSecsAgo, snr: n.snr })
+      if (page.list.length < NEIGHBOURS_PER_PAGE) break
+    } while (list.length < total && list.length < 100)
+    this.sink.remote(id, { neighbours: { ts: Date.now(), total, list } })
+    this.sink.actionResult(id, 'req-neighbours', true, `${total} neighbour${total === 1 ? '' : 's'}`)
+  }
+
+  private async owner(id: string, c: Contact) {
+    const body = await this.binary(c, Uint8Array.of(ReqType.GET_OWNER_INFO))
+    if (!body) return this.sink.actionResult(id, 'req-owner', false, 'No answer (log in first?)')
+    const text = new TextDecoder().decode(body).replace(/\0+$/, '')
+    this.sink.remote(id, { owner: { ts: Date.now(), text } })
+    this.sink.actionResult(id, 'req-owner', true, 'Owner info received')
+  }
+
+  /** Trace out along the stored path to the node and back, recording SNR per hop. */
+  private async trace(id: string, c: Contact) {
+    if (c.outPathLen === OUT_PATH_FLOOD) throw new Error('No known path; use Find path first')
+    const path = decodePath(c.outPathLen, c.outPath) ?? []
+    // Trace hashes are 1 byte per hop here; path hashes may be longer.
+    const first = path.map((h) => parseInt(h.slice(0, 2), 16))
+    const hashes = Uint8Array.from([...first, c.publicKey[0], ...[...first].reverse()])
+    const tag = crypto.getRandomValues(new Uint32Array(1))[0]
+    const f = await this.remote(cmdTracePath(tag, hashes), [Push.TRACE_DATA], (f) => decodeTraceData(f).tag === tag)
+    if (!f) return this.sink.actionResult(id, 'trace', false, 'No answer')
+    const t = decodeTraceData(f)
+    const self = this.self ? idOf(this.self.publicKey) : ''
+    const via = this.resolveHops(path)
+    const out = path.length + 1
+    this.sink.traceroute({
+      nodeId: id,
+      ts: Date.now(),
+      towards: [self, ...via, id],
+      snrTowards: t.snrs.slice(0, out),
+      back: [id, ...[...via].reverse(), self],
+      snrBack: [...t.snrs.slice(out), t.finalSnr],
+    })
   }
 
   get isReady() {
