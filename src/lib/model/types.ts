@@ -148,4 +148,6 @@ export interface TracerouteResult {
   /** SNR per hop, dB. */
   snrTowards: number[]
   snrBack?: number[]
+  /** Request to answer, ms (includes serial polling delays). */
+  rttMs?: number
 }

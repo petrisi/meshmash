@@ -6,6 +6,7 @@
   import Badge from '../Badge.svelte'
   import MiniMap, { type MapPoint } from '../MiniMap.svelte'
   import RemotePanel from './RemotePanel.svelte'
+  import RouteView from './RouteView.svelte'
 
   let { node, compact = false }: { node: MeshNode; compact?: boolean } = $props()
 
@@ -14,7 +15,6 @@
   const actions = $derived(nodeActions(proto, node, isSelf))
   const self = $derived(app.nodeById.get(app.selfId))
   const dist = $derived(isSelf ? undefined : distanceKm(self?.position, node.position))
-  const tr = $derived(app.traceroutes[node.id])
   const busy = $derived(app.busy[node.id])
   const results = $derived(
     Object.values(app.results[node.id] ?? {})
@@ -78,31 +78,7 @@
 
   <RemotePanel {node} bind:loginOpen />
 
-  {#if tr}
-    <div class="section"><span>Route</span><span class="faint">{ago(tr.ts, app.now)} ago</span></div>
-    <div class="route">
-      <div class="dir muted">Towards</div>
-      <ol>
-        {#each tr.towards as id, i (i)}
-          <li>
-            <span class="hop">{name(id)}</span>
-            {#if i > 0}<span class="mono {snrClass(tr.snrTowards[i - 1])}">{tr.snrTowards[i - 1]} dB</span>{/if}
-          </li>
-        {/each}
-      </ol>
-      {#if tr.back}
-        <div class="dir muted">Back</div>
-        <ol>
-          {#each tr.back as id, i (i)}
-            <li>
-              <span class="hop">{name(id)}</span>
-              {#if i > 0 && tr.snrBack}<span class="mono {snrClass(tr.snrBack[i - 1])}">{tr.snrBack[i - 1]} dB</span>{/if}
-            </li>
-          {/each}
-        </ol>
-      {/if}
-    </div>
-  {/if}
+  <RouteView nodeId={node.id} />
 
   <div class="section"><span>Node</span></div>
   <dl class="kv">
@@ -195,9 +171,6 @@
     gap: 6px;
     padding: 0 12px 6px;
   }
-  .route {
-    padding: 0 12px 6px;
-  }
   .results {
     list-style: none;
     margin: 0;
@@ -227,26 +200,5 @@
   }
   .results .pending .mark {
     color: var(--accent);
-  }
-  .dir {
-    font-size: 11px;
-    margin-top: 2px;
-  }
-  ol {
-    margin: 2px 0 6px;
-    padding-left: 22px;
-  }
-  li {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  li::marker {
-    color: var(--faint);
-  }
-  .hop {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 </style>

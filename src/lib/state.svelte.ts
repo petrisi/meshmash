@@ -47,6 +47,8 @@ class AppState {
   dmPeers = $state<string[]>([])
   lastRead = $state<Record<string, number>>({})
   traceroutes = $state<Record<string, TracerouteResult>>({})
+  /** Newest first, per node, this session. */
+  traceHistory = $state<Record<string, TracerouteResult[]>>({})
   /** Pending request action per node id. */
   busy = $state<Record<string, string>>({})
   /** Latest result per node id and action. */
@@ -247,9 +249,12 @@ class AppState {
         if (channel !== undefined) this.#heardOn(`ch:${channel}`, nodeId, ts)
       },
       traceroute: (r) => {
-        this.traceroutes[r.nodeId] = r
         const a = this.busy[r.nodeId]
-        if (a) this.#result(r.nodeId, a, 'ok', 'Route received')
+        const started = a ? this.results[r.nodeId]?.[a]?.ts : undefined
+        const tr = started ? { ...r, rttMs: r.ts - started } : r
+        this.traceroutes[r.nodeId] = tr
+        this.traceHistory[r.nodeId] = [tr, ...(this.traceHistory[r.nodeId] ?? [])].slice(0, 20)
+        if (a) this.#result(r.nodeId, a, 'ok', `${r.towards.length - 1} hop${r.towards.length === 2 ? '' : 's'}`)
       },
       actionResult: (nodeId, action, ok, text) => this.#result(nodeId, action, ok ? 'ok' : 'failed', text),
       remote: (nodeId, patch) => {
@@ -303,6 +308,7 @@ class AppState {
     this.messages = []
     this.dmPeers = []
     this.traceroutes = {}
+    this.traceHistory = {}
     this.busy = {}
     this.results = {}
     this.remote = {}
