@@ -63,6 +63,12 @@ export function initials(name: string, max = 2): string {
   return graphemes(s).slice(0, max).join('').toUpperCase()
 }
 
+/** Meshtastic reports 101 for external power. */
+export function battery(pct: number | undefined): string {
+  if (pct === undefined) return ''
+  return pct > 100 ? 'ext power' : `${pct}%`
+}
+
 /** Stable hue per node id for badges. */
 export function hue(id: string): number {
   let h = 0

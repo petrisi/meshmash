@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago, distanceKm, km, snrClass, uptime } from '../../format'
+  import { ago, battery, distanceKm, km, snrClass, uptime } from '../../format'
   import { KIND_LABEL, nodeActions } from '../../model/capabilities'
   import type { MeshNode } from '../../model/types'
   import { app } from '../../state.svelte'
@@ -102,7 +102,7 @@
   {#if !compact}
     <div class="section"><span>Telemetry</span></div>
     <dl class="kv">
-      <dt>Battery</dt><dd>{node.batteryPct !== undefined ? `${node.batteryPct}%` : '—'}{node.voltage ? ` · ${node.voltage.toFixed(2)} V` : ''}</dd>
+      <dt>Battery</dt><dd>{battery(node.batteryPct) || '—'}{node.voltage ? ` · ${node.voltage.toFixed(2)} V` : ''}</dd>
       {#if proto === 'meshtastic'}
         <dt>Channel util</dt><dd>{node.channelUtil !== undefined ? `${node.channelUtil}%` : '—'}</dd>
         <dt>Air util TX</dt><dd>{node.airUtilTx !== undefined ? `${node.airUtilTx}%` : '—'}</dd>

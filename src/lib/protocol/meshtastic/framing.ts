@@ -56,7 +56,11 @@ export class FrameDecoder {
   private takeText(bytes: number[], out: StreamItem[]) {
     for (const b of bytes) {
       if (b === 0x0a) {
-        const line = this.textDecoder.decode(Uint8Array.from(this.text)).replace(/\r$/, '')
+        // Firmware log lines carry ANSI color codes.
+        const line = this.textDecoder
+          .decode(Uint8Array.from(this.text))
+          .replace(/\x1b\[[0-9;]*m/g, '')
+          .replace(/\r$/, '')
         this.text = []
         if (line.trim()) out.push({ type: 'text', text: line })
       } else if (b !== START2 || this.text.length) {

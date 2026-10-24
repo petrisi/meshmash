@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { battery } from '../format'
   import { radioActions } from '../model/capabilities'
   import { app } from '../state.svelte'
 
@@ -29,7 +30,7 @@
   {/each}
   <span class="muted">{app.nodes.length} nodes</span>
   {#if info.batteryPct !== undefined}
-    <span class="muted">Batt {info.batteryPct}%{info.voltage ? ` · ${info.voltage.toFixed(2)} V` : ''}</span>
+    <span class="muted">Batt {battery(info.batteryPct)}{info.voltage ? ` · ${info.voltage.toFixed(2)} V` : ''}</span>
   {/if}
   <span class="conn"><i></i>{s.transport}</span>
   <button onclick={() => app.disconnect()}>Disconnect</button>

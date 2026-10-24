@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago, distanceKm, km, snrClass } from '../../format'
+  import { ago, battery, distanceKm, km, snrClass } from '../../format'
   import { KIND_LABEL } from '../../model/capabilities'
   import type { MeshNode, NodeKind } from '../../model/types'
   import { app } from '../../state.svelte'
@@ -180,7 +180,7 @@
               <td class="num">{isSelf ? '' : (n.hops ?? '—')}</td>
               <td class="num {snrClass(n.snr)}">{n.snr ?? ''}</td>
               <td class="num">{n.rssi ?? ''}</td>
-              <td class="num" class:poor={n.batteryPct !== undefined && n.batteryPct < 20}>{n.batteryPct !== undefined ? `${n.batteryPct}%` : ''}</td>
+              <td class="num" class:poor={n.batteryPct !== undefined && n.batteryPct < 20}>{battery(n.batteryPct)}</td>
               <td class="num">{isSelf ? '' : km(dist(n))}</td>
             </tr>
           {/each}
