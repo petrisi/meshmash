@@ -38,10 +38,17 @@
     <h1>meshmash</h1>
     <p class="muted">Web client for Meshtastic® and MeshCore radios.</p>
 
-    {#if app.connecting}
+    {#if app.reconnecting && !app.connecting}
       <div class="progress">
         <i class="spin"></i>
-        <span>{app.connecting}</span>
+        <span>Waiting for {app.reconnecting.name}… (attempt {app.reconnecting.attempt})</span>
+      </div>
+      {#if app.connectError}<p class="poor small">{app.connectError}</p>{/if}
+      <button onclick={() => app.stopReconnect()}>Stop reconnecting</button>
+    {:else if app.connecting}
+      <div class="progress">
+        <i class="spin"></i>
+        <span>{app.reconnecting ? `${app.reconnecting.name}: ` : ''}{app.connecting}</span>
       </div>
       <div class="tail mono">
         {#each lastLines as e, i (i)}

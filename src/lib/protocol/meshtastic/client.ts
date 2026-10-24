@@ -93,7 +93,9 @@ export class MeshtasticClient implements RadioClient {
 
   private decoder = new FrameDecoder()
   private nonce = 0
-  private configDone: (() => void) | null = null
+  /** Everyone waiting for the current config download; a re-request keeps them waiting. */
+  private configWaiters: { resolve: () => void; reject: (e: Error) => void }[] = []
+  private configTimer: ReturnType<typeof setTimeout> | undefined
   private myNum = 0
   private metadata: Metadata = {}
   private lora: LoRaConfig = {}
@@ -143,17 +145,16 @@ export class MeshtasticClient implements RadioClient {
 
   private awaitConfig(nonce: number) {
     this.nonce = nonce
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timed out waiting for configuration')), 45_000)
-      this.configDone = () => {
-        clearTimeout(timer)
-        resolve()
-      }
-    })
+    clearTimeout(this.configTimer)
+    this.configTimer = setTimeout(() => {
+      for (const w of this.configWaiters.splice(0)) w.reject(new Error('Timed out waiting for configuration'))
+    }, 45_000)
+    return new Promise<void>((resolve, reject) => this.configWaiters.push({ resolve, reject }))
   }
 
   async close() {
     if (this.heartbeat) clearInterval(this.heartbeat)
+    clearTimeout(this.configTimer)
     for (const p of this.pending.values()) clearTimeout(p.timer)
     await this.send(toRadioDisconnect(), 'disconnect').catch(() => {})
   }
@@ -285,8 +286,8 @@ export class MeshtasticClient implements RadioClient {
     for (const n of this.nodes.values()) this.sink.node(this.toNode(n))
     this.sink.channels(this.channels())
     this.ready = true
-    this.configDone?.()
-    this.configDone = null
+    clearTimeout(this.configTimer)
+    for (const w of this.configWaiters.splice(0)) w.resolve()
     this.sink.ready()
   }
 

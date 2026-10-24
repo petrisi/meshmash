@@ -17,6 +17,7 @@ import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
 import { loadMessages, saveMessage } from './store/db'
+import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
 
@@ -170,18 +171,30 @@ class AppState {
   }
 
   /** Real radio over Web Serial. Without a port, asks the user to pick one. */
-  async connectSerial(port?: SerialPort) {
+  /** Set while trying to get back to the last radio after a drop or a reload. */
+  reconnecting = $state<{ name: string; attempt: number } | null>(null)
+  #reconnectGen = 0
+  #expectNodeId: string | undefined
+
+  /**
+   * Opens a port and connects. With `expectNodeId`, a radio with another node id is
+   * disconnected again (ports sharing USB ids cannot be told apart beforehand).
+   * Returns whether a radio is connected.
+   */
+  async connectSerial(port?: SerialPort, opts: { expectNodeId?: string; reconnect?: boolean } = {}): Promise<boolean> {
+    if (!opts.reconnect) this.#stopReconnect()
     this.connectError = null
-    this.connecting = 'Opening port…'
-    this.log = []
+    this.connecting = opts.reconnect ? 'Reconnecting…' : 'Opening port…'
+    if (!opts.reconnect) this.log = []
     try {
       port ??= await navigator.serial.requestPort()
     } catch {
       this.connecting = null // picker cancelled
-      return
+      return false
     }
     const t = new SerialTransport(port)
     this.#transport = t
+    this.#expectNodeId = opts.expectNodeId
     const sink = this.#sink(t)
     try {
       await t.open()
@@ -189,11 +202,55 @@ class AppState {
       const { protocol, probe } = await detectProtocol(t, sink)
       this.#client = protocol === 'meshtastic' ? new MeshtasticClient(t, sink) : new MeshCoreClient(t, sink)
       await this.#client.start(probe)
+      if (opts.expectNodeId && this.session?.info.nodeId !== opts.expectNodeId)
+        throw new Error(`a different radio (${this.session?.info.longName}) is on this port`)
+      const info = this.session!.info
+      const usb = port.getInfo()
+      saveLastRadio({ nodeId: info.nodeId, name: info.longName, vid: usb.usbVendorId, pid: usb.usbProductId, auto: true })
+      return true
     } catch (e) {
-      this.connectError = e instanceof Error ? e.message : String(e)
+      const msg = e instanceof Error ? e.message : String(e)
+      if (opts.reconnect) this.#log({ dir: 'info', kind: 'reconnect', summary: msg })
+      else this.connectError = msg
       this.connecting = null
       await this.#teardown()
+      return false
     }
+  }
+
+  /** Reconnects to the last radio on page load, unless the user had disconnected it. */
+  autoConnect() {
+    const last = loadLastRadio()
+    if (last?.auto && 'serial' in navigator) void this.#reconnect(0, 30_000)
+  }
+
+  async #reconnect(firstDelayMs: number, forMs: number) {
+    const last = loadLastRadio()
+    if (!last) return
+    const gen = ++this.#reconnectGen
+    const deadline = Date.now() + forMs
+    for (let attempt = 1; gen === this.#reconnectGen && Date.now() < deadline; attempt++) {
+      await new Promise((r) => setTimeout(r, attempt === 1 ? firstDelayMs : 3000))
+      if (gen !== this.#reconnectGen) return
+      this.reconnecting = { name: last.name, attempt }
+      for (const p of await candidatePorts(last)) {
+        if (gen !== this.#reconnectGen) return
+        if (await this.connectSerial(p, { expectNodeId: last.nodeId, reconnect: true })) {
+          this.reconnecting = null
+          return
+        }
+      }
+    }
+    if (gen === this.#reconnectGen) this.reconnecting = null
+  }
+
+  stopReconnect() {
+    this.#stopReconnect()
+  }
+
+  #stopReconnect() {
+    this.#reconnectGen++
+    this.reconnecting = null
   }
 
   /** Development aid: writes raw bytes to the open port. */
@@ -267,6 +324,8 @@ class AppState {
       },
       log: (e) => this.#log(e),
       ready: async () => {
+        // Wrong radio on a reconnect attempt: connectSerial disconnects it; never show it.
+        if (this.#expectNodeId && this.session?.info.nodeId !== this.#expectNodeId) return
         const history = await loadMessages(radioKey()).catch(() => [] as Message[])
         // Outcome of sends interrupted by a disconnect is unknown; stop their spinners.
         for (const m of history) if (m.from === this.selfId && !m.settled) m.settled = true
@@ -285,8 +344,11 @@ class AppState {
       closed: (reason) => {
         if (this.#transport !== t) return
         this.#log({ dir: 'info', kind: 'transport', summary: `closed${reason ? `: ${reason}` : ''}` })
-        if (this.session && reason) this.connectError = `Connection lost: ${reason}`
+        const wasUp = !!this.session && !this.connecting
+        if (wasUp && reason) this.connectError = `Connection lost: ${reason}`
         void this.#teardown()
+        // USB drops (hub resets, replugs) are common; keep trying for a while.
+        if (wasUp && reason) void this.#reconnect(1500, 10 * 60_000)
       },
     }
   }
@@ -317,6 +379,9 @@ class AppState {
   }
 
   disconnect() {
+    this.#stopReconnect()
+    const last = loadLastRadio()
+    if (last && this.session) saveLastRadio({ ...last, auto: false })
     void this.#teardown()
   }
 

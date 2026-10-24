@@ -6,6 +6,8 @@ const app = mount(App, {
   target: document.getElementById('app')!,
 })
 
-if (import.meta.env.DEV) Object.assign(window, { meshmash: (await import('./lib/state.svelte')).app })
+const { app: state } = await import('./lib/state.svelte')
+state.autoConnect()
+if (import.meta.env.DEV) Object.assign(window, { meshmash: state })
 
 export default app
