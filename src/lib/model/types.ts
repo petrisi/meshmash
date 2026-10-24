@@ -121,6 +121,14 @@ export interface Capabilities {
   messageMaxBytes: number
 }
 
+/** Outcome of a node action that waits for an answer over the air. */
+export interface ActionResult {
+  action: string
+  state: 'pending' | 'ok' | 'failed'
+  ts: number
+  text?: string
+}
+
 export interface TracerouteResult {
   nodeId: string
   ts: number

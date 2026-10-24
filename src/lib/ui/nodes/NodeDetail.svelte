@@ -15,6 +15,12 @@
   const dist = $derived(isSelf ? undefined : distanceKm(self?.position, node.position))
   const tr = $derived(app.traceroutes[node.id])
   const busy = $derived(app.busy[node.id])
+  const results = $derived(
+    Object.values(app.results[node.id] ?? {})
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 4),
+  )
+  const label = (id: string) => actions.find((a) => a.id === id)?.label ?? id
   const mapPoints = $derived.by(() => {
     if (!node.position) return []
     const pts: MapPoint[] = [{ pos: node.position, label: node.shortName }]
@@ -49,6 +55,19 @@
       </button>
     {/each}
   </div>
+
+  {#if results.length}
+    <ul class="results">
+      {#each results as r (r.action)}
+        <li class={r.state}>
+          <span class="mark">{r.state === 'pending' ? '…' : r.state === 'ok' ? '✓' : '✕'}</span>
+          <span class="what">{label(r.action)}</span>
+          <span class="txt">{r.state === 'pending' ? 'waiting for answer' : r.text}</span>
+          <span class="faint when">{ago(r.ts, app.now)}</span>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 
   {#if tr}
     <div class="section"><span>Route</span><span class="faint">{ago(tr.ts, app.now)} ago</span></div>
@@ -169,6 +188,36 @@
   }
   .route {
     padding: 0 12px 6px;
+  }
+  .results {
+    list-style: none;
+    margin: 0;
+    padding: 2px 12px 6px;
+    font-size: 12px;
+  }
+  .results li {
+    display: grid;
+    grid-template-columns: 14px max-content 1fr max-content;
+    gap: 6px;
+    line-height: 1.6;
+  }
+  .results .what {
+    color: var(--muted);
+  }
+  .results .txt {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .results .ok .mark {
+    color: var(--good);
+  }
+  .results .failed .mark,
+  .results .failed .txt {
+    color: var(--danger);
+  }
+  .results .pending .mark {
+    color: var(--accent);
   }
   .dir {
     font-size: 11px;

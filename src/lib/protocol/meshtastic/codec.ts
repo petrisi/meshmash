@@ -37,6 +37,8 @@ export interface User {
   role?: number
   publicKey?: Uint8Array
   isUnmessagable?: boolean
+  /** Bytes as received. Includes fields we do not model, e.g. the deprecated macaddr. */
+  raw?: Uint8Array
 }
 
 export interface Position {
@@ -164,7 +166,7 @@ export type FromRadio = { id?: number } & (
 )
 
 export function decodeUser(b: Uint8Array): User {
-  const u: User = {}
+  const u: User = { raw: b.slice() }
   for (const f of fields(b)) {
     switch (f.no) {
       case 1: u.id = asString(f.value); break
@@ -185,7 +187,7 @@ export function decodePosition(b: Uint8Array): Position {
     switch (f.no) {
       case 1: p.lat = asSfixed32(f.value) * 1e-7; break
       case 2: p.lon = asSfixed32(f.value) * 1e-7; break
-      case 3: p.alt = asInt32(f.value); break
+      case 3: p.alt = asInt32(f.value) || undefined; break // 0 = unset
       case 4: p.time = asFixed32(f.value); break
     }
   }

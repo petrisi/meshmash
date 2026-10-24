@@ -62,8 +62,9 @@ function presetChannelName(preset?: number) {
     .join('')
 }
 
-function pskSummary(psk: Uint8Array) {
-  if (!psk.length) return 'none'
+/** Firmware treats an empty PSK on a secondary channel as "use the primary key" (Channels.cpp). */
+function pskSummary(psk: Uint8Array, secondary: boolean) {
+  if (!psk.length) return secondary ? 'primary key' : 'none'
   if (psk.length === 1) return psk[0] === 0 ? 'none' : psk[0] === 1 ? 'default key' : `simple key ${psk[0]}`
   return `AES-${psk.length * 8}`
 }
@@ -80,7 +81,12 @@ interface Pending {
   localId: string
   to: number
   timer: ReturnType<typeof setTimeout>
+  /** The radio confirmed it took the packet (queue_status). */
+  accepted: boolean
 }
+
+/** Fallback if a queue_status never names our packet. */
+const ACCEPT_TIMEOUT_MS = 25_000
 
 export class MeshtasticClient implements RadioClient {
   readonly protocol = 'meshtastic' as const
@@ -94,9 +100,15 @@ export class MeshtasticClient implements RadioClient {
   private channelInfos: ChannelInfo[] = []
   private nodes = new Map<number, NodeInfo>()
   private pending = new Map<number, Pending>()
-  private traceroutes = new Map<number, number>()
+  /** Our want_response packet id → the node action waiting for its answer. */
+  private requests = new Map<number, { action: string; nodeId: string }>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private ready = false
+  /** Packets are written one at a time, each after the radio took the previous one. */
+  private txChain: Promise<unknown> = Promise.resolve()
+  private accepting = new Map<number, () => void>()
+  /** When the radio last took a packet per portnum, for its per-port rate limits. */
+  private lastAccepted = new Map<number, number>()
 
   constructor(
     private t: SerialTransport,
@@ -110,13 +122,15 @@ export class MeshtasticClient implements RadioClient {
     if (probe) {
       // Detection already asked for the config; continue with its stream.
       const done = this.awaitConfig(probe.nonce)
-      for (const chunk of probe.received) this.onData(chunk)
+      probe.received.forEach((chunk, i) => this.onData(chunk, i < probe.textLogged))
       await done
     } else {
       await this.t.write(WAKE)
       await this.requestConfig()
     }
-    this.heartbeat = setInterval(() => void this.send(toRadioHeartbeat(), 'heartbeat'), 60_000)
+    this.heartbeat = setInterval(() => {
+      if (!this.accepting.size) void this.send(toRadioHeartbeat(), 'heartbeat')
+    }, 60_000)
   }
 
   private requestConfig() {
@@ -147,10 +161,10 @@ export class MeshtasticClient implements RadioClient {
     await this.t.write(encodeFrame(payload))
   }
 
-  private onData(chunk: Uint8Array) {
+  private onData(chunk: Uint8Array, textLogged = false) {
     for (const item of this.decoder.push(chunk)) {
       if (item.type === 'text') {
-        this.sink.log({ dir: 'text', kind: 'console', summary: item.text })
+        if (!textLogged) this.sink.log({ dir: 'text', kind: 'console', summary: item.text })
         continue
       }
       let msg: FromRadio
@@ -213,6 +227,17 @@ export class MeshtasticClient implements RadioClient {
       case 'channel':
         this.channelInfos[m.channel.index] = m.channel
         break
+      case 'queue_status': {
+        this.accepting.get(m.meshPacketId)?.()
+        const pend = this.pending.get(m.meshPacketId)
+        if (!pend) break
+        if (m.res !== 0) {
+          clearTimeout(pend.timer)
+          this.pending.delete(m.meshPacketId)
+          this.sink.updateMessage(pend.localId, { status: 'failed', settled: true })
+        } else this.accept(m.meshPacketId)
+        break
+      }
       case 'config':
         if (m.lora) this.lora = m.lora
         break
@@ -270,7 +295,7 @@ export class MeshtasticClient implements RadioClient {
         index: c.index,
         name: c.name || (c.role === 1 ? presetChannelName(this.lora.modemPreset) : `Channel ${c.index}`),
         kind: c.role === 1 ? 'primary' : 'secondary',
-        encryption: pskSummary(c.psk),
+        encryption: pskSummary(c.psk, c.role === 2),
         muted: c.muted,
       }))
   }
@@ -335,6 +360,12 @@ export class MeshtasticClient implements RadioClient {
 
     const d = p.decoded
     if (!d) return
+    const req = d.requestId ? this.requests.get(d.requestId) : undefined
+    if (req && d.portnum !== Port.ROUTING) {
+      this.requests.delete(d.requestId!)
+      if (d.portnum === Port.TRACEROUTE) this.onTraceroute(p.from, decodeRouteDiscovery(d.payload))
+      else this.sink.actionResult(req.nodeId, req.action, true, RESPONSE_TEXT[d.portnum] ?? 'Answered')
+    }
     switch (d.portnum) {
       case Port.TEXT: {
         if (p.from === this.myNum) return
@@ -382,15 +413,16 @@ export class MeshtasticClient implements RadioClient {
         }
         return
       }
-      case Port.ROUTING:
+      case Port.ROUTING: {
+        // A request answered only by a routing error, e.g. NO_RESPONSE.
+        const err = decodeRouting(d.payload).errorReason ?? 0
+        if (req && err !== 0) {
+          this.requests.delete(d.requestId!)
+          this.sink.actionResult(req.nodeId, req.action, false, routingErrorText(err))
+        }
         this.onRouting(p, decodeRouting(d.payload))
         return
-      case Port.TRACEROUTE:
-        if (d.requestId && this.traceroutes.has(d.requestId)) {
-          this.traceroutes.delete(d.requestId)
-          this.onTraceroute(p.from, decodeRouteDiscovery(d.payload))
-        }
-        return
+      }
     }
   }
 
@@ -404,6 +436,7 @@ export class MeshtasticClient implements RadioClient {
     const reqId = p.decoded?.requestId
     const pend = reqId !== undefined ? this.pending.get(reqId) : undefined
     if (!pend) return
+    this.accept(reqId!)
     const err = r.errorReason ?? 0
     if (err !== 0) {
       this.sink.updateMessage(pend.localId, { status: 'failed', settled: true })
@@ -434,13 +467,53 @@ export class MeshtasticClient implements RadioClient {
     return (Math.floor(Math.random() * 0xfffffffe) + 1) >>> 0
   }
 
-  private async sendPacket(
+  /**
+   * Queues a MeshPacket. Resolves with its id once written; the next packet waits until the
+   * radio confirms this one with queue_status. TinyUSB boards poll serial input only every
+   * ~20 s and their receive buffer is small, so a burst of frames can be partly lost. The
+   * firmware also silently drops packets that break its per-port rate limits.
+   */
+  private sendPacket(
     to: number,
     portnum: number,
     payload: Uint8Array,
     opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean } = {},
-  ) {
+  ): Promise<number> {
     const id = this.packetId()
+    const written = this.txChain.then(async () => {
+      const wait = (this.lastAccepted.get(portnum) ?? 0) + (RATE_LIMIT_MS[portnum] ?? 0) + 1000 - Date.now()
+      if (RATE_LIMIT_MS[portnum] && wait > 0) {
+        this.sink.log({ dir: 'info', kind: 'rate limit', summary: `${PORTNUM[portnum]} waits ${Math.ceil(wait / 1000)} s` })
+        await new Promise((r) => setTimeout(r, wait))
+      }
+      await this.writePacket(id, to, portnum, payload, opts)
+    })
+    this.txChain = written
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            const timer = setTimeout(done, ACCEPT_TIMEOUT_MS)
+            const self = this
+            function done() {
+              clearTimeout(timer)
+              self.accepting.delete(id)
+              self.lastAccepted.set(portnum, Date.now())
+              resolve()
+            }
+            this.accepting.set(id, done)
+          }),
+      )
+      .catch(() => {})
+    return written.then(() => id)
+  }
+
+  private async writePacket(
+    id: number,
+    to: number,
+    portnum: number,
+    payload: Uint8Array,
+    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean },
+  ) {
     await this.send(
       toRadioPacket({
         to,
@@ -454,7 +527,6 @@ export class MeshtasticClient implements RadioClient {
       }),
       `${PORTNUM[portnum]} → ${to === BROADCAST ? 'broadcast' : this.name(to)} id ${id}`,
     )
-    return id
   }
 
   async sendText(thread: ThreadKey, text: string, localId: string) {
@@ -462,12 +534,20 @@ export class MeshtasticClient implements RadioClient {
     const to = isDm ? nodeNum(thread.slice(3)) : BROADCAST
     const channel = isDm ? 0 : Number(thread.slice(3))
     const id = await this.sendPacket(to, Port.TEXT, utf8Encode(text), { channel, wantAck: true })
-    this.sink.updateMessage(localId, { status: 'sent' })
-    const timer = setTimeout(() => {
+    // Some boards read serial input only every ~20 s; stay 'pending' until the radio takes it.
+    this.pending.set(id, { localId, to, accepted: false, timer: setTimeout(() => this.accept(id), ACCEPT_TIMEOUT_MS) })
+  }
+
+  private accept(id: number) {
+    const pend = this.pending.get(id)
+    if (!pend || pend.accepted) return
+    pend.accepted = true
+    clearTimeout(pend.timer)
+    this.sink.updateMessage(pend.localId, { status: 'sent' })
+    pend.timer = setTimeout(() => {
       this.pending.delete(id)
-      this.sink.updateMessage(localId, { settled: true })
+      this.sink.updateMessage(pend.localId, { settled: true })
     }, REPEAT_WINDOW_MS)
-    this.pending.set(id, { localId, to, timer })
   }
 
   async action(action: string, id: string) {
@@ -476,22 +556,28 @@ export class MeshtasticClient implements RadioClient {
     switch (action) {
       case 'traceroute': {
         const pid = await this.sendPacket(num, Port.TRACEROUTE, new Uint8Array(), { wantResponse: true })
-        this.traceroutes.set(pid, num)
+        this.requests.set(pid, { action, nodeId: id })
         return
       }
-      case 'req-position':
-        await this.sendPacket(num, Port.POSITION, self?.position ? encodePosition(self.position) : new Uint8Array(), {
-          wantResponse: true,
-        })
+      case 'req-position': {
+        const payload = self?.position ? encodePosition(self.position) : new Uint8Array()
+        const pid = await this.sendPacket(num, Port.POSITION, payload, { wantResponse: true })
+        this.requests.set(pid, { action, nodeId: id })
         return
-      case 'req-telemetry':
-        await this.sendPacket(num, Port.TELEMETRY, encodeTelemetryRequest(), { wantResponse: true })
+      }
+      case 'req-telemetry': {
+        const pid = await this.sendPacket(num, Port.TELEMETRY, encodeTelemetryRequest(), { wantResponse: true })
+        this.requests.set(pid, { action, nodeId: id })
         return
-      case 'exchange-info':
-        if (self?.user) await this.sendPacket(num, Port.NODEINFO, encodeUser(self.user), { wantResponse: true })
+      }
+      case 'exchange-info': {
+        if (!self?.user) throw new Error('own user info unknown')
+        const pid = await this.sendPacket(num, Port.NODEINFO, ownUser(self.user), { wantResponse: true })
+        this.requests.set(pid, { action, nodeId: id })
         return
+      }
       case 'send-nodeinfo':
-        if (self?.user) await this.sendPacket(BROADCAST, Port.NODEINFO, encodeUser(self.user))
+        if (self?.user) await this.sendPacket(BROADCAST, Port.NODEINFO, ownUser(self.user))
         return
       case 'send-position':
         if (self?.position?.lat) await this.sendPacket(BROADCAST, Port.POSITION, encodePosition(self.position))
@@ -525,6 +611,37 @@ export class MeshtasticClient implements RadioClient {
 }
 
 const round1 = (x: number) => Math.round(x * 10) / 10
+
+/**
+ * Our User exactly as the radio reported it. The firmware stores a NODEINFO we send as its own
+ * entry; a re-encoded copy lacks macaddr, and on the next boot NodeDB::pickNewNodeNum then sees
+ * a MAC mismatch and switches to a random node number.
+ */
+const ownUser = (u: User) => u.raw ?? encodeUser(u)
+
+/** PhoneAPI::handleToRadioPacket drops faster repeats of these ports (ms). */
+const RATE_LIMIT_MS: Record<number, number> = {
+  [Port.TRACEROUTE]: 30_000,
+  [Port.POSITION]: 10_000,
+  [Port.TELEMETRY]: 10_000,
+  [Port.TEXT]: 2_000,
+}
+
+const RESPONSE_TEXT: Record<number, string> = {
+  [Port.POSITION]: 'Position received',
+  [Port.TELEMETRY]: 'Telemetry received',
+  [Port.NODEINFO]: 'User info received',
+}
+
+function routingErrorText(err: number): string {
+  switch (ROUTING_ERROR[err]) {
+    case 'NO_RESPONSE': return 'Node had nothing to send back (no data, or rate-limited)'
+    case 'MAX_RETRANSMIT': return 'No acknowledgement after retries'
+    case 'NO_ROUTE': return 'No route to node'
+    case 'TIMEOUT': return 'Timed out'
+    default: return `Failed: ${ROUTING_ERROR[err] ?? err}`
+  }
+}
 
 // Exported for offline tests.
 export { decodeFromRadio, decodeNodeInfo }

@@ -13,6 +13,7 @@
   // One state per message; DM recipient ACK outranks repeat counting.
   const state = $derived.by(() => {
     if (m.status === 'failed') return 'failed'
+    if (m.status === 'pending') return m.settled ? 'unknown' : 'queued'
     if (isDm && m.status === 'acked') return 'delivered'
     if (repeats >= REPEAT_OK && (m.settled || !counts)) return 'ok'
     if (!m.settled) return repeats ? 'counting' : 'waiting'
@@ -20,6 +21,8 @@
   })
 
   const TITLE: Record<string, string> = {
+    queued: 'Waiting for the radio to take the message',
+    unknown: 'Outcome unknown (disconnected before the radio took it)',
     waiting: 'Sent, listening for rebroadcasts',
     counting: 'Rebroadcasts heard so far',
     ok: 'Rebroadcast heard',
@@ -31,12 +34,14 @@
 </script>
 
 <span class="d {state}" title="{TITLE[state]}{counts && repeats ? ` · ${repeats} heard` : ''}">
-  {#if state === 'waiting' || state === 'counting'}
+  {#if state === 'queued' || state === 'waiting' || state === 'counting'}
     <i class="spin"></i>
   {:else if state === 'delivered'}
     <b>✓✓</b>
   {:else if state === 'ok' || state === 'weak'}
     <b>✓</b>
+  {:else if state === 'unknown'}
+    <b>?</b>
   {:else}
     <b>✕</b>
   {/if}
@@ -63,6 +68,10 @@
     border-top-color: var(--accent);
     animation: spin 0.9s linear infinite;
   }
+  .queued .spin {
+    border-top-color: var(--faint);
+    animation-duration: 2.4s;
+  }
   .counting .n {
     color: var(--accent);
   }
@@ -70,7 +79,8 @@
   .delivered {
     color: var(--good);
   }
-  .weak {
+  .weak,
+  .unknown {
     color: var(--fair);
   }
   .none,

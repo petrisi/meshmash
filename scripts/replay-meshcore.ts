@@ -59,6 +59,7 @@ const sink: RadioSink = {
   updateMessage: () => bump('updateMessage'),
   heard: () => bump('heard'),
   traceroute: (r) => console.log('TRACE', JSON.stringify(r)),
+  actionResult: (id, action, ok, text) => console.log('RESULT', id, action, ok, text),
   log: (e) => {
     bump(`log:${e.dir}`)
     if (e.dir === 'error' || e.dir === 'info') console.log('LOG', e.dir, e.kind, e.summary)

@@ -33,6 +33,8 @@ export interface RadioSink {
   /** A packet from nodeId was heard, optionally on a channel index. */
   heard(nodeId: string, ts: number, channel?: number): void
   traceroute(r: TracerouteResult): void
+  /** Answer (or definite failure) for a request started by RadioClient.action. */
+  actionResult(nodeId: string, action: string, ok: boolean, text?: string): void
   log(e: Omit<LogEntry, 'ts'>): void
   /** Initial download complete; UI can show the radio. */
   ready(): void
@@ -44,6 +46,8 @@ export interface Probe {
   nonce: number
   /** Raw bytes received since the first probe. */
   received: Uint8Array[]
+  /** Leading chunks of `received` whose console text detection already logged. */
+  textLogged: number
 }
 
 export interface RadioClient {

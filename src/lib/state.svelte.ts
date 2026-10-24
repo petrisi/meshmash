@@ -1,5 +1,6 @@
 import { capabilitiesFor, REPEAT_WINDOW_MS } from './model/capabilities'
 import type {
+  ActionResult,
   Capabilities,
   Channel,
   MeshNode,
@@ -21,6 +22,14 @@ import { SerialTransport } from './transport/serial'
 export type View = 'messages' | 'nodes' | 'log'
 
 const LOG_MAX = 5000
+let localSeq = 0
+/** Node actions that wait for an answer from the other node. */
+const REQUEST_ACTIONS = new Set([
+  'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
+  'path-discovery', 'trace', 'req-status', 'login', 'req-neighbours',
+])
+/** Covers slow serial polling plus a multi-hop round trip. */
+const REQUEST_TIMEOUT_MS = 60_000
 
 export interface Session {
   info: RadioInfo
@@ -37,7 +46,10 @@ class AppState {
   dmPeers = $state<string[]>([])
   lastRead = $state<Record<string, number>>({})
   traceroutes = $state<Record<string, TracerouteResult>>({})
+  /** Pending request action per node id. */
   busy = $state<Record<string, string>>({})
+  /** Latest result per node id and action. */
+  results = $state<Record<string, Record<string, ActionResult>>>({})
   /**
    * Per channel: node id → last time heard on that channel. Meshtastic counts any packet
    * (every packet carries a channel); MeshCore only channel messages.
@@ -234,11 +246,15 @@ class AppState {
       },
       traceroute: (r) => {
         this.traceroutes[r.nodeId] = r
-        delete this.busy[r.nodeId]
+        const a = this.busy[r.nodeId]
+        if (a) this.#result(r.nodeId, a, 'ok', 'Route received')
       },
+      actionResult: (nodeId, action, ok, text) => this.#result(nodeId, action, ok ? 'ok' : 'failed', text),
       log: (e) => this.#log(e),
       ready: async () => {
         const history = await loadMessages(radioKey()).catch(() => [] as Message[])
+        // Outcome of sends interrupted by a disconnect is unknown; stop their spinners.
+        for (const m of history) if (m.from === this.selfId && !m.settled) m.settled = true
         const ids = new Set(this.messages.map((m) => m.id))
         this.messages = [...history.filter((m) => !ids.has(m.id)), ...this.messages].sort((a, b) => a.ts - b.ts)
         const dms = this.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3))
@@ -279,6 +295,7 @@ class AppState {
     this.dmPeers = []
     this.traceroutes = {}
     this.busy = {}
+    this.results = {}
     this.channelHeard = {}
   }
 
@@ -321,7 +338,7 @@ class AppState {
   }
 
   send(thread: ThreadKey, text: string) {
-    const id = `local-${Date.now()}`
+    const id = `local-${Date.now()}-${++localSeq}`
     const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0 }
     this.messages.push(msg)
     this.markRead(thread)
@@ -355,17 +372,27 @@ class AppState {
     })
   }
 
+  #result(nodeId: string, action: string, state: ActionResult['state'], text?: string): ActionResult {
+    const r: ActionResult = { action, state, ts: Date.now(), text }
+    this.results[nodeId] = { ...this.results[nodeId], [action]: r }
+    if (state === 'pending') this.busy[nodeId] = action
+    else if (this.busy[nodeId] === action) delete this.busy[nodeId]
+    return r
+  }
+
   runAction(action: string, nodeId: string) {
     const node = this.nodeById.get(nodeId)
     if (!node) return
     if (action === 'dm') return this.openDm(nodeId)
     if (this.#client) {
-      if (action === 'traceroute' || action === 'path-discovery') {
-        this.busy[nodeId] = action
-        setTimeout(() => delete this.busy[nodeId], 60_000)
+      if (REQUEST_ACTIONS.has(action)) {
+        const r = this.#result(nodeId, action, 'pending')
+        setTimeout(() => {
+          if (this.results[nodeId]?.[action]?.ts === r.ts) this.#result(nodeId, action, 'failed', 'No answer')
+        }, REQUEST_TIMEOUT_MS)
       }
       this.#client.action(action, nodeId).catch((e) => {
-        delete this.busy[nodeId]
+        this.#result(nodeId, action, 'failed', e instanceof Error ? e.message : String(e))
         this.#log({ dir: 'error', kind: action, summary: String(e) })
       })
       return

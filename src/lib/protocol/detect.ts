@@ -82,8 +82,9 @@ export async function detectProtocol(
     await waitFor(1800)
   }
   // Keep buffering until the client takes over the port.
+  const textLogged = received.length
   t.onData = (chunk) => received.push(chunk)
   if (!found) throw new Error('No Meshtastic or MeshCore radio answered on this port')
   sink.log({ dir: 'info', kind: 'detect', summary: `protocol: ${found}` })
-  return { protocol: found, probe: { nonce: PROBE_NONCE, received } }
+  return { protocol: found, probe: { nonce: PROBE_NONCE, received, textLogged } }
 }

@@ -49,6 +49,7 @@ const sink: RadioSink = {
   updateMessage: () => {},
   heard: () => {},
   traceroute: (r) => console.log('TRACE', JSON.stringify(r)),
+  actionResult: (id, action, ok, text) => console.log('RESULT', id, action, ok, text),
   log: (e) => {
     kinds[e.kind] = (kinds[e.kind] ?? 0) + 1
     if (e.dir === 'error') console.log('ERROR', e.kind, e.summary)
