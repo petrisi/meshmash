@@ -4,6 +4,7 @@ import {
   decodeDeviceMetrics,
   decodeFromRadio,
   decodeMeshPacket,
+  decodeNeighborInfo,
   decodePosition,
   decodeRouteDiscovery,
   decodeRouting,
@@ -251,5 +252,25 @@ describe('ToRadio encoders', () => {
     expect([...encodeTelemetryRequest()]).toEqual([0x12, 0x00])
     const [f] = [...fields(encodeAdminUint(39, 0xdeadbeef))]
     expect([f.no, f.value]).toEqual([39, 0xdeadbeef])
+  })
+})
+
+describe('decodeNeighborInfo', () => {
+  it('reads reporter and neighbours, rounding SNR to quarter dB', () => {
+    const nb = (id: number, snr: number) => new PbWriter().uint(1, id).fixed32(2, f32(snr))
+    const b = new PbWriter().uint(1, 0x11223344).uint(3, 21600).message(4, nb(0xaabbccdd, 6.27)).message(4, nb(0x01020304, -3.5)).finish()
+    expect(decodeNeighborInfo(b)).toEqual({
+      nodeId: 0x11223344,
+      neighbors: [
+        { nodeId: 0xaabbccdd, snr: 6.25 },
+        { nodeId: 0x01020304, snr: -3.5 },
+      ],
+    })
+  })
+
+  it('drops the zero-id dummy neighbour and accepts an empty payload', () => {
+    const b = new PbWriter().uint(1, 5).message(4, new PbWriter().uint(1, 0)).finish()
+    expect(decodeNeighborInfo(b).neighbors).toEqual([])
+    expect(decodeNeighborInfo(new Uint8Array())).toEqual({ nodeId: 0, neighbors: [] })
   })
 })

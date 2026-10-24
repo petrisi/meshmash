@@ -11,6 +11,7 @@ import {
   decodeFromRadio,
   decodeNodeInfo,
   decodePosition,
+  decodeNeighborInfo,
   decodeRouteDiscovery,
   decodeRouting,
   decodeTelemetry,
@@ -416,12 +417,29 @@ export class MeshtasticClient implements RadioClient {
         }
         return
       }
+      case Port.NEIGHBORINFO: {
+        // Answers to our request and the node's periodic reports look the same.
+        const nb = decodeNeighborInfo(d.payload)
+        const reporter = nb.nodeId ? nodeId(nb.nodeId) : fromId
+        this.sink.remote(reporter, {
+          neighbours: {
+            ts: now,
+            total: nb.neighbors.length,
+            list: nb.neighbors.map((x) => ({ id: nodeId(x.nodeId), heardSecsAgo: 0, snr: x.snr })),
+          },
+        })
+        return
+      }
       case Port.ROUTING: {
         // A request answered only by a routing error, e.g. NO_RESPONSE.
         const err = decodeRouting(d.payload).errorReason ?? 0
         if (req && err !== 0) {
           this.requests.delete(d.requestId!)
-          this.sink.actionResult(req.nodeId, req.action, false, routingErrorText(err))
+          const text =
+            req.action === 'req-neighbours' && ROUTING_ERROR[err] === 'NO_RESPONSE'
+              ? 'No answer: needs firmware 2.7.16+ with the neighbour info module enabled'
+              : routingErrorText(err)
+          this.sink.actionResult(req.nodeId, req.action, false, text)
         }
         this.onRouting(p, decodeRouting(d.payload))
         return
@@ -559,6 +577,11 @@ export class MeshtasticClient implements RadioClient {
     const num = nodeNum(id)
     const self = this.nodes.get(this.myNum)
     switch (action) {
+      case 'req-neighbours': {
+        const pid = await this.sendPacket(num, Port.NEIGHBORINFO, new Uint8Array(), { wantResponse: true })
+        this.requests.set(pid, { action, nodeId: id })
+        return
+      }
       case 'traceroute': {
         const pid = await this.sendPacket(num, Port.TRACEROUTE, new Uint8Array(), { wantResponse: true })
         this.requests.set(pid, { action, nodeId: id })
@@ -640,6 +663,7 @@ const RESPONSE_TEXT: Record<number, string> = {
   [Port.POSITION]: 'Position received',
   [Port.TELEMETRY]: 'Telemetry received',
   [Port.NODEINFO]: 'User info received',
+  [Port.NEIGHBORINFO]: 'Neighbours received',
 }
 
 function routingErrorText(err: number): string {

@@ -78,7 +78,7 @@
         <tr>
           <td class="nm"><button class="link" onclick={() => app.nodeById.has(n.id) && app.showNode(n.id)}>{name(n.id)}</button></td>
           <td class="mono">{n.snr} dB</td>
-          <td class="faint">{ago(Date.now() - n.heardSecsAgo * 1000, Date.now())}</td>
+          <td class="faint">{n.heardSecsAgo > 0 ? ago(Date.now() - n.heardSecsAgo * 1000, Date.now()) : ''}</td>
         </tr>
       {/each}
     </tbody>

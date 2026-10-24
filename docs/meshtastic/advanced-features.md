@@ -240,7 +240,7 @@ ToRadio.packet { to = target, channel = idx, want_ack = true?,
 
 | Target firmware / state | Result |
 |---|---|
-| 2.7.15 (and older) | No reply handler → `Routing NO_RESPONSE (8)` (even if module enabled). |
+| 2.7.15 (and older) | No reply handler. Observed with the module disabled on 2.7.15: **no answer at all** (no `NO_RESPONSE`), so the request times out. |
 | 2.7.16+ with `neighbor_info.enabled` | Reply `NeighborInfo` (its current table, `node_id = target`), `request_id = request.id`. |
 | 2.7.16+, replied < 3 min ago (global, not per requester) | Silently ignored (no NAK). |
 | module disabled (not instantiated) | `NO_RESPONSE (8)`. |

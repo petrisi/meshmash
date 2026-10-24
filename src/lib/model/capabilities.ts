@@ -22,6 +22,7 @@ function mtPeerActions(node: MeshNode): NodeAction[] {
   return [
     { id: 'dm', label: 'Direct message', primary: true },
     { id: 'traceroute', label: 'Traceroute' },
+    { id: 'req-neighbours', label: 'Neighbours' },
     { id: 'req-position', label: 'Request position' },
     { id: 'req-telemetry', label: 'Request telemetry' },
     { id: 'exchange-info', label: 'Exchange user info' },

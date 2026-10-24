@@ -35,6 +35,12 @@ const REQUEST_ACTIONS = new Set([
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
   'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path',
 ])
+/** Likely reasons when a request times out. */
+const TIMEOUT_TEXT: Record<string, string> = {
+  'req-neighbours': 'No answer (Meshtastic: needs 2.7.16+ with neighbour info enabled)',
+  'req-position': 'No answer (node may have no position, or answered within the last 3 min)',
+  'exchange-info': 'No answer (nodes answer each requester at most every 12 h)',
+}
 /** Covers slow serial polling plus a multi-hop round trip. */
 const REQUEST_TIMEOUT_MS = 90_000
 
@@ -553,7 +559,7 @@ class AppState {
       if (REQUEST_ACTIONS.has(action)) {
         const r = this.#result(nodeId, action, 'pending')
         setTimeout(() => {
-          if (this.results[nodeId]?.[action]?.ts === r.ts) this.#result(nodeId, action, 'failed', 'No answer')
+          if (this.results[nodeId]?.[action]?.ts === r.ts) this.#result(nodeId, action, 'failed', TIMEOUT_TEXT[action] ?? 'No answer')
         }, REQUEST_TIMEOUT_MS)
       }
       this.#client.action(action, nodeId).catch((e) => {

@@ -352,6 +352,28 @@ function decodeMyInfo(b: Uint8Array): MyInfo {
   return m
 }
 
+export interface NeighborInfo {
+  nodeId: number
+  neighbors: { nodeId: number; snr: number }[]
+}
+
+/** NEIGHBORINFO_APP payload. last_rx_time is local to the reporting node and not sent. */
+export function decodeNeighborInfo(b: Uint8Array): NeighborInfo {
+  const n: NeighborInfo = { nodeId: 0, neighbors: [] }
+  for (const f of fields(b)) {
+    if (f.no === 1) n.nodeId = asUint(f.value)
+    else if (f.no === 4) {
+      const x = { nodeId: 0, snr: 0 }
+      for (const g of fields(asBytes(f.value))) {
+        if (g.no === 1) x.nodeId = asUint(g.value)
+        else if (g.no === 2) x.snr = Math.round(asFloat(g.value) * 4) / 4
+      }
+      if (x.nodeId) n.neighbors.push(x)
+    }
+  }
+  return n
+}
+
 export function decodeRouteDiscovery(b: Uint8Array): RouteDiscovery {
   const r: RouteDiscovery = { route: [], snrTowards: [], routeBack: [], snrBack: [] }
   for (const f of fields(b)) {
