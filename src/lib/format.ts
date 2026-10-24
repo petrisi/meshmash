@@ -16,7 +16,8 @@ export function clock(ts: number): string {
 export function dayLabel(ts: number): string {
   const d = new Date(ts)
   const today = new Date()
-  const yest = new Date(Date.now() - 86_400_000)
+  const yest = new Date()
+  yest.setDate(yest.getDate() - 1) // calendar day, correct across DST changes
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === yest.toDateString()) return 'Yesterday'
   return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })

@@ -125,10 +125,23 @@ export interface Capabilities {
 export interface RemoteData {
   login?: { role: string; ts: number }
   status?: { ts: number; fields: { label: string; value: string }[] }
-  telemetry?: { ts: number; readings: { channel: number; name: string; value: string }[] }
+  telemetry?: { ts: number; readings: { channel: number; type: number; name: string; value: string }[] }
   neighbours?: { ts: number; total: number; list: { id: string; heardSecsAgo: number; snr: number }[] }
   owner?: { ts: number; text: string }
   cli?: { ts: number; dir: 'out' | 'in'; text: string }[]
+}
+
+/** One telemetry sample: metric name → value, e.g. battery, voltage, channelUtil, temperature. */
+export interface Sample {
+  ts: number
+  v: Record<string, number>
+}
+
+/** What we keep per node across sessions. */
+export interface NodeData {
+  traces?: TracerouteResult[]
+  remote?: RemoteData
+  samples?: Sample[]
 }
 
 /** Outcome of a node action that waits for an answer over the air. */

@@ -8,6 +8,7 @@ import type {
   Protocol,
   RadioInfo,
   RemoteData,
+  Sample,
   ThreadKey,
   TracerouteResult,
 } from './model/types'
@@ -16,7 +17,7 @@ import { detectProtocol } from './protocol/detect'
 import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
-import { loadMessages, saveMessage } from './store/db'
+import { loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
@@ -25,6 +26,9 @@ export type View = 'messages' | 'nodes' | 'log'
 
 const LOG_MAX = 5000
 let localSeq = 0
+/** MeshNode fields kept as telemetry history. */
+const SAMPLED = ['batteryPct', 'voltage', 'channelUtil', 'airUtilTx', 'snr', 'rssi'] as const
+const SAMPLES_MAX = 1000
 /** Node actions that wait for an answer from the other node. */
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
@@ -56,6 +60,9 @@ class AppState {
   /** Latest result per node id and action. */
   results = $state<Record<string, Record<string, ActionResult>>>({})
   remote = $state<Record<string, RemoteData>>({})
+  /** Telemetry history per node, oldest first. */
+  samples = $state<Record<string, Sample[]>>({})
+  #saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /**
    * Per channel: node id → last time heard on that channel. Meshtastic counts any packet
    * (every packet carries a channel); MeshCore only channel messages.
@@ -183,6 +190,8 @@ class AppState {
    */
   async connectSerial(port?: SerialPort, opts: { expectNodeId?: string; reconnect?: boolean } = {}): Promise<boolean> {
     if (!opts.reconnect) this.#stopReconnect()
+    // A reconnect attempt may still hold a port; never run two connections at once.
+    if (this.#transport) await this.#teardown()
     this.connectError = null
     this.connecting = opts.reconnect ? 'Reconnecting…' : 'Opening port…'
     if (!opts.reconnect) this.log = []
@@ -197,9 +206,14 @@ class AppState {
     this.#expectNodeId = opts.expectNodeId
     const sink = this.#sink(t)
     try {
+      const superseded = () => {
+        if (this.#transport !== t) throw new Error('superseded')
+      }
       await t.open()
+      superseded()
       t.onClose = (reason) => sink.closed(reason)
       const { protocol, probe } = await detectProtocol(t, sink)
+      superseded()
       this.#client = protocol === 'meshtastic' ? new MeshtasticClient(t, sink) : new MeshCoreClient(t, sink)
       await this.#client.start(probe)
       if (opts.expectNodeId && this.session?.info.nodeId !== opts.expectNodeId)
@@ -209,6 +223,8 @@ class AppState {
       saveLastRadio({ nodeId: info.nodeId, name: info.longName, vid: usb.usbVendorId, pid: usb.usbProductId, auto: true })
       return true
     } catch (e) {
+      // Superseded by a newer connection: leave that one alone.
+      if (this.#transport !== t) return false
       const msg = e instanceof Error ? e.message : String(e)
       if (opts.reconnect) this.#log({ dir: 'info', kind: 'reconnect', summary: msg })
       else this.connectError = msg
@@ -282,6 +298,9 @@ class AppState {
         const n = this.nodeById.get(patch.id)
         if (n) Object.assign(n, patch)
         else this.nodes.push({ longName: patch.id, shortName: '?', kind: 'client', ...patch })
+        const v: Record<string, number> = {}
+        for (const k of SAMPLED) if (typeof patch[k] === 'number' && !Number.isNaN(patch[k])) v[k] = patch[k]
+        if (this.connecting === null && Object.keys(v).length) this.#sample(patch.id, v)
       },
       removeNode: (id) => {
         this.nodes = this.nodes.filter((n) => n.id !== id)
@@ -312,21 +331,39 @@ class AppState {
         const tr = started ? { ...r, rttMs: r.ts - started } : r
         this.traceroutes[r.nodeId] = tr
         this.traceHistory[r.nodeId] = [tr, ...(this.traceHistory[r.nodeId] ?? [])].slice(0, 20)
+        this.#saveNode(r.nodeId)
         if (a) this.#result(r.nodeId, a, 'ok', `${r.towards.length - 1} hop${r.towards.length === 2 ? '' : 's'}`)
       },
       actionResult: (nodeId, action, ok, text) => this.#result(nodeId, action, ok ? 'ok' : 'failed', text),
       remote: (nodeId, patch) => {
         this.remote[nodeId] = { ...this.remote[nodeId], ...patch }
+        const v: Record<string, number> = {}
+        for (const r of patch.telemetry?.readings ?? []) {
+          const x = parseFloat(r.value)
+          if (!Number.isNaN(x) && r.type !== 136) v[`${r.name} ch${r.channel}`] = x
+        }
+        if (Object.keys(v).length) this.#sample(nodeId, v)
+        this.#saveNode(nodeId)
       },
       cliLine: (nodeId, dir, text) => {
         const r = (this.remote[nodeId] ??= {})
         r.cli = [...(r.cli ?? []), { ts: Date.now(), dir, text }].slice(-200)
+        this.#saveNode(nodeId)
       },
       log: (e) => this.#log(e),
       ready: async () => {
         // Wrong radio on a reconnect attempt: connectSerial disconnects it; never show it.
         if (this.#expectNodeId && this.session?.info.nodeId !== this.#expectNodeId) return
         const history = await loadMessages(radioKey()).catch(() => [] as Message[])
+        const saved = await loadNodeData(radioKey()).catch(() => ({}))
+        for (const [id, d] of Object.entries(saved)) {
+          if (d.traces?.length) {
+            this.traceHistory[id] = d.traces
+            this.traceroutes[id] = d.traces[0]
+          }
+          if (d.remote) this.remote[id] = d.remote
+          if (d.samples) this.samples[id] = d.samples
+        }
         // Outcome of sends interrupted by a disconnect is unknown; stop their spinners.
         for (const m of history) if (m.from === this.selfId && !m.settled) m.settled = true
         const ids = new Set(this.messages.map((m) => m.id))
@@ -375,6 +412,9 @@ class AppState {
     this.busy = {}
     this.results = {}
     this.remote = {}
+    this.samples = {}
+    for (const t of this.#saveTimers.values()) clearTimeout(t)
+    this.#saveTimers.clear()
     this.channelHeard = {}
   }
 
@@ -474,6 +514,35 @@ class AppState {
 
   cli(nodeId: string, text: string) {
     this.#client?.cli?.(nodeId, text).catch((e) => this.#log({ dir: 'error', kind: 'cli', summary: String(e) }))
+  }
+
+  /** Coalesces samples less than a minute apart into one. */
+  #sample(nodeId: string, v: Record<string, number>) {
+    const list = (this.samples[nodeId] ??= [])
+    const last = list.at(-1)
+    if (last && Date.now() - last.ts < 60_000) Object.assign(last.v, v)
+    else list.push({ ts: Date.now(), v })
+    if (list.length > SAMPLES_MAX) list.splice(0, list.length - SAMPLES_MAX)
+    this.#saveNode(nodeId)
+  }
+
+  /** Debounced write of a node's traces, fetched data and samples. */
+  #saveNode(nodeId: string) {
+    const radio = this.session?.info.nodeId
+    if (!radio || this.isDemo) return
+    clearTimeout(this.#saveTimers.get(nodeId))
+    this.#saveTimers.set(
+      nodeId,
+      setTimeout(() => {
+        this.#saveTimers.delete(nodeId)
+        const remote = this.remote[nodeId]
+        void saveNodeData(radio, nodeId, {
+          traces: this.traceHistory[nodeId],
+          remote: remote && { ...remote, cli: remote.cli?.slice(-50) },
+          samples: this.samples[nodeId],
+        }).catch(() => {})
+      }, 2000),
+    )
   }
 
   runAction(action: string, nodeId: string) {

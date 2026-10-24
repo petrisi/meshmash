@@ -4,6 +4,7 @@ import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../mo
 import type { SerialTransport } from '../../transport/serial'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { RadioClient, RadioSink } from '../types'
+import { type ClockFix, clockFixes, correctRadioSecs, recordClockFix } from './clockFix'
 import {
   cmdBinaryReq,
   cmdLogin,
@@ -103,6 +104,7 @@ export class MeshCoreClient implements RadioClient {
   private contacts = new Map<string, Contact>()
   /** Radio clock minus our clock, ms. MeshCore radios often have no RTC source. */
   private clockOffset = 0
+  private clockFixes: ClockFix[] = []
   private syncing = false
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
@@ -210,6 +212,7 @@ export class MeshCoreClient implements RadioClient {
     this.sink.progress('Querying device…')
     this.device = decodeDeviceInfo(await this.expect(cmdDeviceQuery(), Resp.DEVICE_INFO))
     this.self = decodeSelfInfo(await this.expect(cmdAppStart('meshmash'), Resp.SELF_INFO))
+    this.clockFixes = clockFixes(idOf(this.self.publicKey))
 
     const t = await this.expect(cmdGetTime(), Resp.CURR_TIME)
     this.clockOffset = new LeReader(t.subarray(1)).u32() * 1000 - Date.now()
@@ -218,7 +221,10 @@ export class MeshCoreClient implements RadioClient {
     // Firmware only accepts forward adjustments.
     if (this.clockOffset < -5_000) {
       try {
-        await this.expect(cmdSetTime(Math.floor(Date.now() / 1000)), Resp.OK)
+        const now = Math.floor(Date.now() / 1000)
+        await this.expect(cmdSetTime(now), Resp.OK)
+        recordClockFix(idOf(this.self.publicKey), { at: now, skew: Math.round(-this.clockOffset / 1000) })
+        this.clockFixes = clockFixes(idOf(this.self.publicKey))
         this.clockOffset = 0
         this.sink.log({ dir: 'info', kind: 'clock', summary: 'radio clock set' })
       } catch (e) {
@@ -334,12 +340,24 @@ export class MeshCoreClient implements RadioClient {
       shortName: initials(c.name || '?'),
       kind: KIND[c.type] ?? 'chat',
       publicKey: hex(c.publicKey),
-      lastHeard: c.lastMod ? Math.min(this.radioTime(c.lastMod), Date.now()) : undefined,
+      lastHeard: this.lastHeard(c),
       hops: pathHops(c.outPathLen),
       path,
       position: c.lat || c.lon ? { lat: c.lat, lon: c.lon } : undefined,
       favorite: (c.flags & 1) !== 0,
     }
+  }
+
+  /**
+   * lastMod is stamped by our radio's clock, which may have been wrong when it was stored
+   * (no RTC). The advert's own timestamp comes from the sender's clock; take the later of the
+   * two, never in the future.
+   */
+  private lastHeard(c: Contact): number | undefined {
+    const mod = c.lastMod ? this.radioTime(correctRadioSecs(c.lastMod, this.clockFixes)) : 0
+    const advert = c.lastAdvert * 1000
+    const t = Math.max(mod, advert <= Date.now() + 60_000 ? advert : 0)
+    return t ? Math.min(t, Date.now()) : undefined
   }
 
   /** Resolves path hop hashes to node ids where a repeater's key starts with the hash. */

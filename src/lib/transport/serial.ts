@@ -18,6 +18,11 @@ export class SerialTransport {
 
   async open(baudRate = 115200) {
     await this.port.open({ baudRate, bufferSize: 64 * 1024 })
+    if (this.closing) {
+      // close() was called while opening.
+      await this.port.close().catch(() => {})
+      throw new Error('closed while opening')
+    }
     // RTS asserted with DTR released resets ESP32 boards via their auto-reset circuit;
     // DTR asserted is needed by some native-USB (nRF52) boards to send at all.
     await this.port.setSignals({ dataTerminalReady: true, requestToSend: false }).catch(() => {})
