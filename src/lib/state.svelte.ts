@@ -15,6 +15,7 @@ import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
 import { loadMessages, saveMessage } from './store/db'
+import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
 
 export type View = 'messages' | 'nodes' | 'log'
@@ -197,6 +198,8 @@ class AppState {
     return {
       info: (info, caps) => {
         this.session = { info, caps: { ...capabilitiesFor(info.protocol), ...caps }, transport: t.label }
+        const proto = info.protocol === 'meshtastic' ? 'Meshtastic' : 'MeshCore'
+        void rememberPortName(t.port, `${info.longName} · ${proto}`)
       },
       progress: (text) => {
         if (this.connecting !== null) this.connecting = text

@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { app } from '../state.svelte'
+  import { portNames } from '../transport/portNames'
 
   const hasSerial = 'serial' in navigator
   let known = $state<SerialPort[]>([])
+  let names = $state<(string | undefined)[]>([])
 
   const label = (p: SerialPort) => {
     const i = p.getInfo()
@@ -12,7 +14,9 @@
   }
 
   async function refresh() {
-    if (hasSerial) known = await navigator.serial.getPorts()
+    if (!hasSerial) return
+    known = await navigator.serial.getPorts()
+    names = await portNames(known)
   }
 
   onMount(() => {
@@ -54,8 +58,8 @@
           <span class="faint small">Previously allowed ports</span>
           {#each known as p, i (i)}
             <button onclick={() => app.connectSerial(p)}>
-              <span class="mono">{label(p)}</span>
-              <span class="faint">connect</span>
+              <span>{names[i] ?? 'Unknown radio'}</span>
+              <span class="mono faint">{label(p)}</span>
             </button>
           {/each}
         </div>
