@@ -1,5 +1,7 @@
+import type { Transport } from './types'
+
 /** Byte transport over Web Serial. One reader loop delivers chunks to `onData`. */
-export class SerialTransport {
+export class SerialTransport implements Transport {
   onData: (chunk: Uint8Array) => void = () => {}
   onClose: (reason?: string) => void = () => {}
 

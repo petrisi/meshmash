@@ -3,7 +3,7 @@ import { REPEAT_WINDOW_MS } from '../../model/capabilities'
 import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import { hex, utf8Decode, utf8Encode } from '../bytes'
 import type { Probe, RadioClient, RadioSink, SendOptions } from '../types'
-import type { SerialTransport } from '../../transport/serial'
+import type { Transport } from '../../transport/types'
 import {
   Admin,
   BROADCAST,
@@ -117,7 +117,7 @@ export class MeshtasticClient implements RadioClient {
   private lastAccepted = new Map<number, number>()
 
   constructor(
-    private t: SerialTransport,
+    private t: Transport,
     private sink: RadioSink,
   ) {
     t.onData = (c) => this.onData(c)

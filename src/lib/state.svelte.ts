@@ -17,13 +17,14 @@ import { mockSession } from './mock/mock'
 import { detectProtocol } from './protocol/detect'
 import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
-import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
+import type { LogEntry, Probe, RadioClient, RadioSink } from './protocol/types'
 import { redactCli, sanitizeSink } from './sanitize'
 import { loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
+import type { Transport } from './transport/types'
 
 export type View = 'messages' | 'nodes' | 'map' | 'log'
 
@@ -92,7 +93,9 @@ class AppState {
   connecting = $state<string | null>(null)
   connectError = $state<string | null>(null)
   #client: RadioClient | null = null
-  #transport: SerialTransport | null = null
+  #transport: Transport | null = null
+  /** Bumped by every connect and disconnect; an older attempt that finishes is dropped. */
+  #connectGen = 0
   /** Ticks every second so relative times ("3s", "47m") stay current. */
   now = $state(Date.now())
   #timers: ReturnType<typeof setInterval>[] = []
@@ -205,38 +208,97 @@ class AppState {
    * Returns whether a radio is connected.
    */
   async connectSerial(port?: SerialPort, opts: { expectNodeId?: string; reconnect?: boolean } = {}): Promise<boolean> {
-    if (!opts.reconnect) this.#stopReconnect()
-    // A reconnect attempt may still hold a port; never run two connections at once.
-    if (this.#transport) await this.#teardown()
-    this.connectError = null
-    this.connecting = opts.reconnect ? 'Reconnecting…' : 'Opening port…'
-    if (!opts.reconnect) this.log = []
+    await this.#begin(opts, 'Opening port…')
+    const gen = this.#connectGen
     try {
       port ??= await navigator.serial.requestPort()
     } catch {
-      this.connecting = null // picker cancelled
+      if (gen === this.#connectGen) this.connecting = null // picker cancelled
       return false
     }
+    if (gen !== this.#connectGen) return false
     const t = new SerialTransport(port)
+    const usb = port.getInfo()
+    return this.#run(
+      t,
+      opts,
+      async (sink) => {
+        await t.open()
+        if (this.#transport !== t) throw new Error('superseded')
+        return detectProtocol(t, sink)
+      },
+      (info) => saveLastRadio({ nodeId: info.nodeId, name: info.longName, vid: usb.usbVendorId, pid: usb.usbProductId, auto: true }),
+    )
+  }
+
+  /** Connects to a radio on WiFi through meshmash-bridge. The bridge says which protocol it runs. */
+  async connectBridge(radio: string, opts: { expectNodeId?: string; reconnect?: boolean; takeover?: boolean } = {}): Promise<boolean> {
+    if (!__BRIDGE__) return false
+    await this.#begin(opts, 'Connecting to the bridge…')
+    const gen = this.#connectGen
+    try {
+      const { loadBridge, openBridgeRadio } = await import('./transport/bridge')
+      const { transport, protocol } = await openBridgeRadio(loadBridge(), radio, {
+        takeover: opts.takeover,
+        onWait: (w) => {
+          if (gen === this.#connectGen)
+            this.connecting = w === 'prompt' ? 'Allow local network access in the browser prompt…' : 'Waiting for the bridge…'
+        },
+      })
+      if (gen !== this.#connectGen) {
+        void transport.close()
+        return false
+      }
+      // No detection: probing a MeshCore TCP port with Meshtastic bytes stalls it.
+      return this.#run(transport, opts, async () => ({ protocol }), (info) =>
+        saveLastRadio({ nodeId: info.nodeId, name: info.longName, auto: true, via: { radio } }),
+      )
+    } catch (e) {
+      if (gen !== this.#connectGen) return false
+      const msg = e instanceof Error ? e.message : String(e)
+      // In use by another window (e.g. a second tab): retrying would not help.
+      const inUse = (e as { code?: number }).code === 4409
+      if (inUse) this.#stopReconnect()
+      if (opts.reconnect && !inUse) this.#log({ dir: 'info', kind: 'reconnect', summary: msg })
+      else this.connectError = msg
+      this.connecting = null
+      return false
+    }
+  }
+
+  async #begin(opts: { reconnect?: boolean }, text: string) {
+    if (!opts.reconnect) this.#stopReconnect()
+    this.#connectGen++
+    // A reconnect attempt may still hold a port; never run two connections at once.
+    if (this.#transport) await this.#teardown()
+    this.connectError = null
+    this.connecting = opts.reconnect ? 'Reconnecting…' : text
+    if (!opts.reconnect) this.log = []
+  }
+
+  /**
+   * Starts the protocol client on a transport. With `expectNodeId`, a radio with another
+   * node id is disconnected again (ports sharing USB ids cannot be told apart beforehand).
+   * Returns whether a radio is connected.
+   */
+  async #run(
+    t: Transport,
+    opts: { expectNodeId?: string; reconnect?: boolean },
+    start: (sink: RadioSink) => Promise<{ protocol: Protocol; probe?: Probe }>,
+    remember: (info: RadioInfo) => void,
+  ): Promise<boolean> {
     this.#transport = t
     this.#expectNodeId = opts.expectNodeId
     const sink = this.#sink(t)
+    t.onClose = (reason) => sink.closed(reason)
     try {
-      const superseded = () => {
-        if (this.#transport !== t) throw new Error('superseded')
-      }
-      await t.open()
-      superseded()
-      t.onClose = (reason) => sink.closed(reason)
-      const { protocol, probe } = await detectProtocol(t, sink)
-      superseded()
+      const { protocol, probe } = await start(sink)
+      if (this.#transport !== t) throw new Error('superseded')
       this.#client = protocol === 'meshtastic' ? new MeshtasticClient(t, sink) : new MeshCoreClient(t, sink)
       await this.#client.start(probe)
       if (opts.expectNodeId && this.session?.info.nodeId !== opts.expectNodeId)
         throw new Error(`a different radio (${this.session?.info.longName}) is on this port`)
-      const info = this.session!.info
-      const usb = port.getInfo()
-      saveLastRadio({ nodeId: info.nodeId, name: info.longName, vid: usb.usbVendorId, pid: usb.usbProductId, auto: true })
+      remember(this.session!.info)
       return true
     } catch (e) {
       // Superseded by a newer connection: leave that one alone.
@@ -253,7 +315,8 @@ class AppState {
   /** Reconnects to the last radio on page load, unless the user had disconnected it. */
   autoConnect() {
     const last = loadLastRadio()
-    if (last?.auto && 'serial' in navigator) void this.#reconnect(0, 30_000)
+    if (!last?.auto) return
+    if (last.via ? __BRIDGE__ : 'serial' in navigator) void this.#reconnect(0, 30_000)
   }
 
   async #reconnect(firstDelayMs: number, forMs: number) {
@@ -265,6 +328,13 @@ class AppState {
       await new Promise((r) => setTimeout(r, attempt === 1 ? firstDelayMs : 3000))
       if (gen !== this.#reconnectGen) return
       this.reconnecting = { name: last.name, attempt }
+      if (last.via) {
+        if (await this.connectBridge(last.via.radio, { expectNodeId: last.nodeId, reconnect: true })) {
+          this.reconnecting = null
+          return
+        }
+        continue
+      }
       for (const p of await candidatePorts(last)) {
         if (gen !== this.#reconnectGen) return
         if (await this.connectSerial(p, { expectNodeId: last.nodeId, reconnect: true })) {
@@ -296,7 +366,7 @@ class AppState {
     return !this.#client
   }
 
-  #sink(t: SerialTransport): RadioSink {
+  #sink(t: Transport): RadioSink {
     const radioKey = () => this.session?.info.nodeId ?? ''
     const persist = (m: Message) => {
       if (radioKey()) void saveMessage(radioKey(), m).catch(() => {})
@@ -305,7 +375,7 @@ class AppState {
       info: (info, caps) => {
         this.session = { info, caps: { ...capabilitiesFor(info.protocol), ...caps }, transport: t.label }
         const proto = info.protocol === 'meshtastic' ? 'Meshtastic' : 'MeshCore'
-        void rememberPortName(t.port, `${info.longName} · ${proto}`)
+        if (t instanceof SerialTransport) void rememberPortName(t.port, `${info.longName} · ${proto}`)
       },
       progress: (text) => {
         if (this.connecting !== null) this.connecting = text
@@ -409,8 +479,8 @@ class AppState {
         const wasUp = !!this.session && !this.connecting
         if (wasUp && reason) this.connectError = `Connection lost: ${reason}`
         void this.#teardown()
-        // USB drops (hub resets, replugs) are common; keep trying for a while.
-        if (wasUp && reason) void this.#reconnect(1500, 10 * 60_000)
+        // USB drops (hub resets, replugs) and WiFi dropouts are common; keep trying for a while.
+        if (wasUp && reason && !t.final) void this.#reconnect(1500, 10 * 60_000)
       },
     })
   }
@@ -445,6 +515,8 @@ class AppState {
 
   disconnect() {
     this.#stopReconnect()
+    this.#connectGen++
+    this.connecting = null
     const last = loadLastRadio()
     if (last && this.session) saveLastRadio({ ...last, auto: false })
     void this.#teardown()

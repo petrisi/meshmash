@@ -1,0 +1,13 @@
+{
+  "name": "meshmash-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lets the meshmash web page reach Meshtastic and MeshCore radios on WiFi",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "bin": { "meshmash-bridge": "src/cli.ts" },
+  "engines": { "node": ">=22.18" },
+  "scripts": { "start": "node src/cli.ts" },
+  "dependencies": { "ws": "8.22.0" },
+  "devDependencies": { "@types/ws": "8.18.2" }
+}

@@ -2,7 +2,15 @@
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
-    "types": ["node", "vite/client"]
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ]
 }

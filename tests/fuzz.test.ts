@@ -6,7 +6,7 @@ import { MeshCoreClient } from '../src/lib/protocol/meshcore/client'
 import { MeshtasticClient } from '../src/lib/protocol/meshtastic/client'
 import { encodeFrame } from '../src/lib/protocol/meshtastic/framing'
 import { PbWriter } from '../src/lib/protocol/protobuf'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 import { mcIn, recordingSink, type Recorded } from './helpers'
 
 /** Deterministic PRNG (mulberry32) so failures reproduce. */
@@ -23,7 +23,7 @@ const ITERATIONS = 4000
 
 function fakePort() {
   const t = { label: 'fuzz', onData: (_: Uint8Array) => {}, onClose: () => {}, write: async () => {} }
-  return t as unknown as SerialTransport & { onData: (c: Uint8Array) => void }
+  return t as unknown as Transport & { onData: (c: Uint8Array) => void }
 }
 
 function randomBytes(r: () => number, max: number) {

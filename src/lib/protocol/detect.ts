@@ -1,5 +1,5 @@
 import type { Protocol } from '../model/types'
-import type { SerialTransport } from '../transport/serial'
+import type { Transport } from '../transport/types'
 import { cmdDeviceQuery, encodeFrame as mcFrame, FrameDecoder as McDecoder, Resp } from './meshcore/codec'
 import { decodeFromRadio, toRadioWantConfig } from './meshtastic/codec'
 import { encodeFrame as mtFrame, FrameDecoder as MtDecoder, WAKE } from './meshtastic/framing'
@@ -22,7 +22,7 @@ export const PROBE_NONCE = 0x1234567
  * every 20 s, so the overall wait has to cover that. Its console log lines identify it early.
  */
 export async function detectProtocol(
-  t: SerialTransport,
+  t: Transport,
   sink: RadioSink,
   timeoutMs = 25_000,
 ): Promise<{ protocol: Protocol; probe: Probe }> {

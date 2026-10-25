@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { MeshtasticClient } from '../src/lib/protocol/meshtastic/client'
 import { decodeMeshPacket, type MeshPacket } from '../src/lib/protocol/meshtastic/codec'
 import { asBytes, fields } from '../src/lib/protocol/protobuf'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 import { recordingSink } from './helpers'
 
 function setup() {
@@ -17,7 +17,7 @@ function setup() {
   const rec = recordingSink()
   const ids = new Map<string, number>()
   rec.sink.updateMessage = (id, patch) => void (patch.packetId !== undefined && ids.set(id, patch.packetId))
-  const client = new MeshtasticClient(t as unknown as SerialTransport, rec.sink)
+  const client = new MeshtasticClient(t as unknown as Transport, rec.sink)
   return { client, packets, ids }
 }
 

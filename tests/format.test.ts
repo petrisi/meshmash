@@ -77,7 +77,10 @@ describe('format', () => {
   it('clock and dayLabel', () => {
     expect(clock(Date.now())).toMatch(/\d{1,2}\D\d{2}/)
     expect(dayLabel(Date.now())).toBe('Today')
-    expect(dayLabel(Date.now() - 86_400_000)).toBe('Yesterday')
+    // Calendar days: a day with a DST change is 23 or 25 hours long.
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    expect(dayLabel(yesterday.getTime())).toBe('Yesterday')
     expect(dayLabel(Date.now() - 10 * 86_400_000)).not.toMatch(/Today|Yesterday/)
   })
 })

@@ -1,7 +1,7 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
 import type { Channel, ContactSettings, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
-import type { SerialTransport } from '../../transport/serial'
+import type { Transport } from '../../transport/types'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { RadioClient, RadioSink } from '../types'
 import { type ClockFix, clockFixes, correctRadioSecs, recordClockFix } from './clockFix'
@@ -150,7 +150,7 @@ export class MeshCoreClient implements RadioClient {
   private echoes: { ct: Uint8Array; localId: string; count: number }[] = []
 
   constructor(
-    private t: SerialTransport,
+    private t: Transport,
     private sink: RadioSink,
   ) {
     t.onData = (c) => this.onData(c)

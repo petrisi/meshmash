@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { Cmd, encodeFrame, FrameDecoder, Resp } from '../src/lib/protocol/meshcore/codec'
 import { MeshCoreClient } from '../src/lib/protocol/meshcore/client'
 import type { RadioSink } from '../src/lib/protocol/types'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 
 const capture = readFileSync(process.argv[2])
 const frames = new FrameDecoder().push(capture).flatMap((i) => (i.type === 'frame' ? [i.payload] : []))
@@ -44,7 +44,7 @@ const fake = {
       for (const f of reply) fake.onData(encodeFrame(f).map((x, i) => (i === 0 ? 0x3e : x)))
     }, 1)
   },
-} as unknown as SerialTransport
+} as unknown as Transport
 
 const counts: Record<string, number> = {}
 const bump = (k: string) => (counts[k] = (counts[k] ?? 0) + 1)

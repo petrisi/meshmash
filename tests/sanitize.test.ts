@@ -5,7 +5,7 @@ import { Resp, TxtType } from '../src/lib/protocol/meshcore/codec'
 import { cmdLogin, cmdSendCli } from '../src/lib/protocol/meshcore/remote'
 import { fields } from '../src/lib/protocol/protobuf'
 import { cleanText, redactCli } from '../src/lib/sanitize'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 import { bytes, mcIn, recordingSink } from './helpers'
 
 describe('cleanText', () => {
@@ -67,7 +67,7 @@ describe('MeshCore log redaction', () => {
   it('logs CLI replies without their text', () => {
     const t = { label: 'x', onData: (_: Uint8Array) => {}, onClose: () => {}, write: async () => {} }
     const rec = recordingSink()
-    new MeshCoreClient(t as unknown as SerialTransport, rec.sink)
+    new MeshCoreClient(t as unknown as Transport, rec.sink)
     const reply = Uint8Array.of(Resp.CONTACT_MSG_RECV_V3, 40, 0, 0, ...pk.subarray(0, 6), 0, TxtType.CLI_DATA, 1, 2, 3, 4, ...utf8Encode('password now: hunter2'))
     expect(rxSecret(reply)).toHaveLength(16)
     t.onData(mcIn(reply))

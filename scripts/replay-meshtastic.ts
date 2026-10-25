@@ -8,7 +8,7 @@ import { encodeFrame, FrameDecoder } from '../src/lib/protocol/meshtastic/framin
 import { MeshtasticClient } from '../src/lib/protocol/meshtastic/client'
 import { fields } from '../src/lib/protocol/protobuf'
 import type { RadioSink } from '../src/lib/protocol/types'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 
 const items = new FrameDecoder().push(readFileSync(process.argv[2]))
 const frames = items.flatMap((i) => (i.type === 'frame' ? [i.payload] : []))
@@ -35,7 +35,7 @@ const fake = {
       }
     }, 1)
   },
-} as unknown as SerialTransport
+} as unknown as Transport
 
 const kinds: Record<string, number> = {}
 const nodes = new Map<string, Record<string, unknown>>()

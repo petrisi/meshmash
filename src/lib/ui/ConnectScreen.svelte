@@ -78,6 +78,11 @@
         <p class="poor small">{app.connectError}</p>
       {/if}
 
+      {#if __BRIDGE__}
+        <div class="sep"><span>or over WiFi</span></div>
+        {#await import('./NetworkRadios.svelte') then m}<m.default />{/await}
+      {/if}
+
       <div class="sep"><span>or try a demo</span></div>
       <div class="demos">
         <button onclick={() => app.connectDemo('meshtastic')}>Demo: Meshtastic</button>

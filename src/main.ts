@@ -7,6 +7,7 @@ const app = mount(App, {
 })
 
 const { app: state } = await import('./lib/state.svelte')
+if (__BRIDGE__) (await import('./lib/transport/bridge')).takePairing()
 state.autoConnect()
 if (import.meta.env.DEV) Object.assign(window, { meshmash: state })
 

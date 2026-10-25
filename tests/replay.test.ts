@@ -10,7 +10,7 @@ import { MeshtasticClient } from '../src/lib/protocol/meshtastic/client'
 import { decodeFromRadio } from '../src/lib/protocol/meshtastic/codec'
 import { encodeFrame, FrameDecoder } from '../src/lib/protocol/meshtastic/framing'
 import { fields, PbWriter } from '../src/lib/protocol/protobuf'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 import { CAPTURES, capture, captureNames, mcIn, recordingSink, type Recorded } from './helpers'
 
 const MESHTASTIC = captureNames('mt-')
@@ -45,7 +45,7 @@ function meshtasticPort(frames: Uint8Array[], chunk = 61) {
       }, 1)
     },
   }
-  return t as unknown as SerialTransport
+  return t as unknown as Transport
 }
 
 function checkMeshtastic(rec: Recorded) {
@@ -146,7 +146,7 @@ function meshcorePort(data: Uint8Array) {
       setTimeout(() => t.onData(concat(...reply.map(mcIn))), 1)
     },
   }
-  return { t: t as unknown as SerialTransport, frames, byCode, commands }
+  return { t: t as unknown as Transport, frames, byCode, commands }
 }
 
 describe('MeshCore replay', () => {

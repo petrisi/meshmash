@@ -8,6 +8,8 @@ export interface LastRadio {
   pid?: number
   /** False after the user disconnected on purpose: do not reconnect on reload. */
   auto: boolean
+  /** Reached through meshmash-bridge rather than USB. */
+  via?: { radio: string }
 }
 
 export function loadLastRadio(): LastRadio | null {

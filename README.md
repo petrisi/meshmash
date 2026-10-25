@@ -66,6 +66,10 @@ npm test        # unit tests
 npm run build   # static build in dist/
 ```
 
+WiFi radios are an optional part of the build: `VITE_BRIDGE=1 npm run build` (or `npm run dev`)
+adds them, reached through the local [meshmash-bridge](bridge/README.md). Without the variable
+the build has no trace of it.
+
 The protocol codecs are written from the firmware sources; no Meshtastic or MeshCore JavaScript
 libraries are used. Protocol notes are in [docs/](docs).
 

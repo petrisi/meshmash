@@ -5,7 +5,7 @@ import { Cmd, Resp } from '../src/lib/protocol/meshcore/codec'
 import { toRadioWantConfig } from '../src/lib/protocol/meshtastic/codec'
 import { encodeFrame } from '../src/lib/protocol/meshtastic/framing'
 import { fields, PbWriter } from '../src/lib/protocol/protobuf'
-import type { SerialTransport } from '../src/lib/transport/serial'
+import type { Transport } from '../src/lib/transport/types'
 import { mcIn, recordingSink } from './helpers'
 
 /** Fake port: `answer` sees each write and returns bytes to deliver shortly after. */
@@ -21,7 +21,7 @@ function fakePort(answer: (written: Uint8Array, n: number) => Uint8Array | undef
       if (reply) setTimeout(() => t.onData(reply), 10)
     },
   }
-  return { t: t as unknown as SerialTransport, writes }
+  return { t: t as unknown as Transport, writes }
 }
 
 const isMcQuery = (b: Uint8Array) => b[0] === 0x3c && b[3] === Cmd.DEVICE_QUERY
