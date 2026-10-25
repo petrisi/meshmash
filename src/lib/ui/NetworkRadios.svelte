@@ -47,6 +47,7 @@
     </button>
   {/if}
   {#if error}<p class="poor small">{error}</p>{/if}
+  {#if app.connectError?.via === 'bridge'}<p class="poor small">{app.connectError.text}</p>{/if}
   {#if bridge.address !== DEFAULT_BRIDGE}<p class="faint small mono">Bridge {bridge.address}</p>{/if}
 </div>
 

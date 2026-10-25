@@ -28,6 +28,16 @@ import type { Transport } from './transport/types'
 
 export type View = 'messages' | 'nodes' | 'map' | 'log'
 
+const viaOf = (t: Transport) => (t instanceof SerialTransport ? 'usb' : 'bridge')
+/** Web Lock held by the tab connected to a radio; all tabs of the site see it. */
+const lockName = (nodeId: string) => `meshmash.radio.${nodeId}`
+
+async function openElsewhere(nodeId: string): Promise<boolean> {
+  if (!('locks' in navigator)) return false
+  const { held = [] } = await navigator.locks.query()
+  return held.some((l) => l.name === lockName(nodeId))
+}
+
 const LOG_MAX = 5000
 let localSeq = 0
 /** MeshNode fields kept as telemetry history. */
@@ -91,7 +101,10 @@ class AppState {
   log = $state<LogEntry[]>([])
   /** Set while a radio connection is being established. */
   connecting = $state<string | null>(null)
-  connectError = $state<string | null>(null)
+  /** The last connection failure, and which kind of connection it was about. */
+  connectError = $state<{ text: string; via: 'usb' | 'bridge' } | null>(null)
+  /** Releases the lock that marks the connected radio as open in this tab. */
+  #releaseLock: (() => void) | null = null
   #client: RadioClient | null = null
   #transport: Transport | null = null
   /** Bumped by every connect and disconnect; an older attempt that finishes is dropped. */
@@ -260,7 +273,7 @@ class AppState {
       const inUse = (e as { code?: number }).code === 4409
       if (inUse) this.#stopReconnect()
       if (opts.reconnect && !inUse) this.#log({ dir: 'info', kind: 'reconnect', summary: msg })
-      else this.connectError = msg
+      else this.connectError = { text: msg, via: 'bridge' }
       this.connecting = null
       return false
     }
@@ -299,13 +312,14 @@ class AppState {
       if (opts.expectNodeId && this.session?.info.nodeId !== opts.expectNodeId)
         throw new Error(`a different radio (${this.session?.info.longName}) is on this port`)
       remember(this.session!.info)
+      this.#holdLock(this.session!.info.nodeId)
       return true
     } catch (e) {
       // Superseded by a newer connection: leave that one alone.
       if (this.#transport !== t) return false
       const msg = e instanceof Error ? e.message : String(e)
       if (opts.reconnect) this.#log({ dir: 'info', kind: 'reconnect', summary: msg })
-      else this.connectError = msg
+      else this.connectError = { text: msg, via: viaOf(t) }
       this.connecting = null
       await this.#teardown()
       return false
@@ -315,8 +329,21 @@ class AppState {
   /** Reconnects to the last radio on page load, unless the user had disconnected it. */
   autoConnect() {
     const last = loadLastRadio()
-    if (!last?.auto) return
-    if (last.via ? __BRIDGE__ : 'serial' in navigator) void this.#reconnect(0, 30_000)
+    if (!last?.auto || !(last.via ? __BRIDGE__ : 'serial' in navigator)) return
+    // Open in another tab of this site: start on the connect screen instead of competing for it.
+    void openElsewhere(last.nodeId).then((open) => {
+      if (!open) void this.#reconnect(0, 30_000)
+    })
+  }
+
+  /** Marks the radio as open in this tab for as long as it stays connected. */
+  #holdLock(nodeId: string) {
+    this.#releaseLock?.()
+    this.#releaseLock = null
+    if (!('locks' in navigator)) return
+    void navigator.locks.request(lockName(nodeId), { ifAvailable: true }, (lock) =>
+      lock ? new Promise<void>((release) => (this.#releaseLock = release)) : undefined,
+    )
   }
 
   async #reconnect(firstDelayMs: number, forMs: number) {
@@ -477,7 +504,7 @@ class AppState {
         if (this.#transport !== t) return
         this.#log({ dir: 'info', kind: 'transport', summary: `closed${reason ? `: ${reason}` : ''}` })
         const wasUp = !!this.session && !this.connecting
-        if (wasUp && reason) this.connectError = `Connection lost: ${reason}`
+        if (wasUp && reason) this.connectError = { text: `Connection lost: ${reason}`, via: viaOf(t) }
         void this.#teardown()
         // USB drops (hub resets, replugs) and WiFi dropouts are common; keep trying for a while.
         if (wasUp && reason && !t.final) void this.#reconnect(1500, 10 * 60_000)
@@ -486,6 +513,8 @@ class AppState {
   }
 
   async #teardown() {
+    this.#releaseLock?.()
+    this.#releaseLock = null
     const c = this.#client
     const t = this.#transport
     this.#client = null

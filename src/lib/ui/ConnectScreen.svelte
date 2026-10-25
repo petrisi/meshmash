@@ -43,7 +43,7 @@
         <i class="spin"></i>
         <span>Waiting for {app.reconnecting.name}… (attempt {app.reconnecting.attempt})</span>
       </div>
-      {#if app.connectError}<p class="poor small">{app.connectError}</p>{/if}
+      {#if app.connectError}<p class="poor small">{app.connectError.text}</p>{/if}
       <button onclick={() => app.stopReconnect()}>Stop reconnecting</button>
     {:else if app.connecting}
       <div class="progress">
@@ -74,8 +74,8 @@
       {#if !hasSerial}
         <p class="poor small">This browser has no Web Serial support. Use Chrome, Edge or another Chromium browser.</p>
       {/if}
-      {#if app.connectError}
-        <p class="poor small">{app.connectError}</p>
+      {#if app.connectError?.via === 'usb'}
+        <p class="poor small">{app.connectError.text}</p>
       {/if}
 
       {#if __BRIDGE__}

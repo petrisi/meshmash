@@ -70,12 +70,20 @@ export function takePairing(): boolean {
   return true
 }
 
-const CLOSE_TEXT: Record<number, string> = {
-  4400: 'The bridge did not understand this page; update meshmash-bridge',
-  4401: 'The bridge requires a token: open the pairing link it prints',
-  4404: 'The bridge has no radio by that name',
-  4409: 'The radio is in use by another meshmash window',
-  4410: 'Another meshmash window took over the radio',
+/** Text for the bridge's close codes, naming the radio when known. */
+function closeText(code: number, radio = 'The radio'): string | undefined {
+  switch (code) {
+    case 4400:
+      return 'The bridge did not understand this page; update meshmash-bridge'
+    case 4401:
+      return 'The bridge requires a token: open the pairing link it prints'
+    case 4404:
+      return `The bridge has no radio named "${radio}"`
+    case 4409:
+      return `${radio} is in use by another meshmash window`
+    case 4410:
+      return `Another meshmash window took over ${radio}`
+  }
 }
 
 /** Chromium asks before a public page may reach loopback (Local Network Access). */
@@ -118,7 +126,8 @@ function handshake(s: BridgeSettings, onWait?: (w: BridgeWait) => void): Promise
     ws.onerror = () => {} // the close event follows
     ws.onclose = (e) => {
       done()
-      if (CLOSE_TEXT[e.code]) reject(new BridgeError(CLOSE_TEXT[e.code], e.code))
+      const text = closeText(e.code)
+      if (text) reject(new BridgeError(text, e.code))
       else void notReached(s.address).then(reject)
     }
     ws.onmessage = (e) => {
@@ -160,13 +169,13 @@ export async function openBridgeRadio(
         const m = JSON.parse(e.data)
         if (m.t === 'closed') reason = String(m.reason ?? '')
         if (m.t !== 'opened') return
-        const transport = new BridgeTransport(ws, `WiFi ${radio}`)
+        const transport = new BridgeTransport(ws, radio)
         resolve({ transport, protocol: m.protocol === 'meshcore' ? 'meshcore' : 'meshtastic' })
       } catch {
         ws.close()
       }
     }
-    ws.onclose = (e) => reject(new BridgeError(reason || CLOSE_TEXT[e.code] || 'The bridge closed the connection', e.code))
+    ws.onclose = (e) => reject(new BridgeError(reason || closeText(e.code, radio) || 'The bridge closed the connection', e.code))
     ws.send(JSON.stringify({ t: 'open', radio, takeover: !!opts.takeover }))
   })
 }
@@ -177,10 +186,13 @@ export class BridgeTransport implements Transport {
   final = false
   private closing = false
 
+  readonly label: string
+
   constructor(
     private ws: WebSocket,
-    readonly label: string,
+    readonly radio: string,
   ) {
+    this.label = `WiFi ${radio}`
     let reason = ''
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) this.onData(new Uint8Array(e.data))
@@ -196,7 +208,7 @@ export class BridgeTransport implements Transport {
       if (this.closing) return this.onClose()
       this.closing = true
       this.final = e.code === 4410
-      this.onClose(reason || CLOSE_TEXT[e.code] || 'bridge connection lost')
+      this.onClose(reason || closeText(e.code, this.radio) || 'bridge connection lost')
     }
   }
 
