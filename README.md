@@ -6,6 +6,11 @@ Plug a radio in over USB, open the page, and meshmash detects whether it runs Me
 MeshCore and adapts the interface to it. No install, no account, no server: the page talks to
 the radio directly over Web Serial, and everything it keeps stays in the browser.
 
+**Open meshmash: <https://www.simol.in/meshmash/>** (Chrome, Edge or another Chromium browser)
+
+Development version, built from `main` with WiFi radios enabled:
+<https://www.simol.in/meshmash-dev/>. It changes often and may break.
+
 ![MeshCore repeater status, sensors and neighbours](docs/screenshots/mc-repeater.png)
 
 ## Features
