@@ -46,7 +46,7 @@ the radio directly over Web Serial, and everything it keeps stays in the browser
 | ![Map with a coarse position selected](docs/screenshots/mt-map.png) Map, coarse position selected | ![Meshtastic nodes by distance](docs/screenshots/mt-nodes.png) Meshtastic nodes by distance, `~` = coarse |
 | ![Meshtastic channel messages](docs/screenshots/mt-messages.png) Meshtastic channel | ![Protocol log](docs/screenshots/mc-log.png) Protocol log |
 | ![MeshCore channel messages](docs/screenshots/mc-messages.png) MeshCore channel | ![MeshCore trace path history](docs/screenshots/mc-route.png) MeshCore two-hop trace and history |
-| ![Connect screen](docs/screenshots/connect.png) Connect screen | |
+| ![Hop limit picker](docs/screenshots/mt-hops.png) Hop limit per message | ![Connect screen](docs/screenshots/connect.png) Connect screen |
 
 ## Requirements
 

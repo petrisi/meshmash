@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import { clock, dayLabel, initials, snrClass } from '../../format'
   import { hopSuggestion } from '../../model/hops'
   import type { Message, ThreadKey } from '../../model/types'
@@ -105,7 +105,7 @@
   }
 
   // Captured when the thread opens: the divider stays put while reading.
-  const mark = app.readMark?.thread === thread ? app.readMark.ts : null
+  const mark = untrack(() => (app.readMark?.thread === thread ? app.readMark.ts : null))
   let opened = false
   $effect(() => {
     void msgs.length
