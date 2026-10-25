@@ -7,6 +7,7 @@
   import MiniMap, { type MapPoint } from '../MiniMap.svelte'
   import RemotePanel from './RemotePanel.svelte'
   import RouteView from './RouteView.svelte'
+  import TelemetryHistory from './TelemetryHistory.svelte'
   import ContactSettingsPanel from './ContactSettingsPanel.svelte'
   import { contactLink } from '../../protocol/meshcore/links'
 
@@ -131,6 +132,8 @@
     </dl>
 
   {/if}
+
+  {#if !compact}<TelemetryHistory nodeId={node.id} />{/if}
 
   <div class="section"><span>Position</span></div>
   <dl class="kv">

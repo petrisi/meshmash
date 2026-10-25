@@ -581,6 +581,9 @@ class AppState {
 
   /** Coalesces samples less than a minute apart into one. */
   #sample(nodeId: string, v: Record<string, number>) {
+    // A voltage of 0 means "not measured" on both protocols.
+    for (const k of Object.keys(v)) if (/^voltage/i.test(k) && v[k] === 0) delete v[k]
+    if (!Object.keys(v).length) return
     this.samples[nodeId] ??= []
     const list = this.samples[nodeId] // the proxy, not the array literal
     const last = list.at(-1)
