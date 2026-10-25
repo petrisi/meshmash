@@ -268,6 +268,18 @@ export interface ChannelInfo {
   secret: Uint8Array
 }
 
+/** Key of a hashtag channel: the first 16 bytes of SHA-256 of its name, '#' included. */
+export async function hashtagSecret(name: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', utf8Encode(name) as Uint8Array<ArrayBuffer>)).subarray(0, 16)
+}
+
+/** A '#' name alone does not make a hashtag channel; the key must be the one derived from it. */
+export async function isHashtagChannel(name: string, secret: Uint8Array): Promise<boolean> {
+  if (!name.startsWith('#') || secret.length !== 16) return false
+  const want = await hashtagSecret(name)
+  return want.every((b, i) => b === secret[i])
+}
+
 export function decodeChannelInfo(f: Uint8Array): ChannelInfo {
   const r = new LeReader(f)
   r.u8()

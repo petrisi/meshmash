@@ -50,6 +50,7 @@ import {
   type Contact,
   ContactType,
   decodeChannelInfo,
+  isHashtagChannel,
   decodeChannelMsg,
   decodeContact,
   decodeContactMsg,
@@ -338,11 +339,12 @@ export class MeshCoreClient implements RadioClient {
         const c = decodeChannelInfo(await this.expect(cmdGetChannel(i), Resp.CHANNEL_INFO))
         if (!c.name) continue
         this.secrets.set(c.index, c.secret)
+        const hashtag = await isHashtagChannel(c.name, c.secret)
         out.push({
           index: c.index,
           name: c.name,
-          kind: c.index === 0 && c.name === 'Public' ? 'public' : c.name.startsWith('#') ? 'hashtag' : 'private',
-          encryption: c.name.startsWith('#') ? 'hashtag key' : c.index === 0 ? 'public key' : 'AES-128',
+          kind: c.index === 0 && c.name === 'Public' ? 'public' : hashtag ? 'hashtag' : 'private',
+          encryption: hashtag ? 'hashtag key' : c.index === 0 ? 'public key' : 'AES-128',
         })
       } catch (e) {
         if (e instanceof CommandError) break

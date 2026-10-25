@@ -145,8 +145,8 @@
       <b>{title}</b>
       <span class="mono faint">{peer.id}</span>
     {:else}
-      <span class="hash mono">{channel?.kind === 'hashtag' ? '#' : channel?.index}</span>
-      <b>{channel?.kind === 'hashtag' ? title.slice(1) : title}</b>
+      <span class="hash mono">{channel?.index}</span>
+      <b>{title}</b>
       <span class="faint">{channel?.encryption}</span>
     {/if}
     {#if peer && isMt}

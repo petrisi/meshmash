@@ -75,10 +75,10 @@
     {@const k = `ch:${ch.index}` as const}
     {@const u = app.unread(k)}
     <button class="row ghost" class:active={app.activeThread === k} onclick={() => app.openThread(k)}>
-      <span class="icon mono">{ch.kind === 'hashtag' ? '#' : ch.index}</span>
+      <span class="icon mono">{ch.index}</span>
       <span class="main">
         <span class="top">
-          <span class="name" class:unread={u}>{ch.kind === 'hashtag' ? ch.name.slice(1) : ch.name}</span>
+          <span class="name" class:unread={u}>{ch.name}</span>
           {#if ch.muted}<span class="faint small">muted</span>{/if}
           <span class="time faint">{ago(lastOf(k)?.ts, app.now)}</span>
         </span>

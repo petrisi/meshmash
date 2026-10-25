@@ -1,8 +1,10 @@
 import { createCipheriv } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { LeWriter, utf8Encode } from '../src/lib/protocol/bytes'
+import { hex, LeWriter, utf8Encode } from '../src/lib/protocol/bytes'
 import {
   Cmd,
+  hashtagSecret,
+  isHashtagChannel,
   cmdAppStart,
   cmdDeviceQuery,
   cmdPathDiscovery,
@@ -250,5 +252,18 @@ describe('commands', () => {
     const p = cmdPathDiscovery(PK)
     expect(p.length).toBe(34)
     expect([p[0], p[1]]).toEqual([Cmd.SEND_PATH_DISCOVERY_REQ, 0])
+  })
+})
+
+describe('hashtag channels', () => {
+  it('derive the key from the name, # included', async () => {
+    expect(hex(await hashtagSecret('#test'))).toBe('9cd8fcf22a47333b591d96a2b848b73f')
+  })
+  it('are recognised by key, not by name alone', async () => {
+    const key = await hashtagSecret('#test')
+    expect(await isHashtagChannel('#test', key)).toBe(true)
+    expect(await isHashtagChannel('#Test', key)).toBe(false)
+    expect(await isHashtagChannel('#test', new Uint8Array(16))).toBe(false)
+    expect(await isHashtagChannel('test', await hashtagSecret('test'))).toBe(false)
   })
 })
