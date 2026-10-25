@@ -599,6 +599,12 @@ Client-side limit: one `POSITION_APP` per 10 s (§0.3).
   | 13 (2.7.x factory ch 0) | 0.0524 | 5.84 km | | 18 | 0.0016 | 182 m |
   | 14 | 0.0262 | 2.92 km | | 19 | 0.0008 | 91 m |
 - `precision_bits (23)` in the sent Position = N.
+- NodeDB positions sent to the client (`FromRadio.node_info`) **lack `precision_bits`**:
+  `TypeConversions::ConvertToPosition` copies only lat/lon/alt/time/location_source (2.7.26),
+  although `PositionLite.precision_bits (6)` is stored. Only live `POSITION_APP` packets carry it.
+  N can be recovered: a truncated coordinate has its lowest set bit at 31 − N in both
+  `latitude_i` and `longitude_i`. An exact position matches that by chance with probability
+  4^−(31−N); meshmash infers N only for 31 − N ≥ 8 (N ≤ 23, cell ≥ 5.7 m).
 - Missing `module_settings`: 2.7.15–2.7.23 treat PRIMARY as 32 (full) and secondaries as 0;
   2.7.24+ (`PositionPrecision.cpp`) treat any channel without module_settings as **0**.
 - 2.8: on channels whose effective key is publicly known (no PSK, 1-byte PSK, well-known names)

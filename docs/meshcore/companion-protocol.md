@@ -160,6 +160,11 @@ existed at 1.4.0.
 | 65 | SEND_RAW_PACKET | 1.16.0 | priority u8, raw packet | OK / ERR |
 | 66 | RUN_CLI_COMMAND | **1.18.0** | CLI text | CLI_REPLY (29) |
 
+`SHARE_CONTACT` (16) re-sends the contact's last advert as stored by the radio, unchanged and
+zero-hop (`BaseChatMesh::shareContactZeroHop`). Works for any contact type. ERR(2): no such
+contact. ERR(3): no stored advert (e.g. a contact added with ADD_UPDATE_CONTACT or from a link
+and never heard) or no free packet.
+
 Any other code gets `[1][1]` (`ERR_CODE_UNSUPPORTED_CMD`). A command that is shorter than
 its length check also falls through to this generic error. For example, `CMD_SEND_LOGIN`
 shorter than 33 bytes returns ERR(1), not ERR(6).

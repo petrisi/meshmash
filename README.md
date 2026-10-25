@@ -14,6 +14,8 @@ the radio directly over Web Serial, and everything it keeps stays in the browser
 - Protocol and firmware detection; the interface follows the radio's capabilities
 - Channels and direct messages with delivery state, search, unread markers and per-thread byte limits
 - Node list with filters, signal, hops, battery and distance; node details with telemetry history charts
+- Map: OpenStreetMap tiles, node markers by type and last heard, direct links, traceroute and neighbour links of the selected node
+- Distances from coarse positions marked `~`; selected node's position uncertainty drawn on the map
 - Reconnects automatically after a USB drop or page reload
 - Raw protocol log
 - Message history and node data stored per radio in IndexedDB
@@ -23,6 +25,7 @@ the radio directly over Web Serial, and everything it keeps stays in the browser
 - Position, telemetry, user info and neighbour info requests
 - Replies and emoji reactions
 - PKI-encrypted direct messages marked 🔒, with readable PKI error messages
+- Position precision (`precision_bits`), also inferred for NodeDB positions that lack it
 - Favourite, ignore, remove from NodeDB
 
 **MeshCore**
@@ -32,15 +35,17 @@ the radio directly over Web Serial, and everything it keeps stays in the browser
 - Room server posts with authors
 - Discover nearby nodes (both-way SNR)
 - Contact links (`meshcore://contact/add`), auto-add settings, adding heard-but-unsaved nodes
+- Share contact (zero-hop re-send of a stored advert) for all contact types
 - Radio clock set on connect
 
 ## Screenshots
 
 | | |
 |---|---|
-| ![Meshtastic channel messages](docs/screenshots/mt-messages.png) Meshtastic channel | ![Meshtastic nodes and traceroute](docs/screenshots/mt-nodes.png) Meshtastic nodes, traceroute |
+| ![Map with a coarse position selected](docs/screenshots/mt-map.png) Map, coarse position selected | ![Meshtastic nodes by distance](docs/screenshots/mt-nodes.png) Meshtastic nodes by distance, `~` = coarse |
+| ![Meshtastic channel messages](docs/screenshots/mt-messages.png) Meshtastic channel | ![Protocol log](docs/screenshots/mc-log.png) Protocol log |
 | ![MeshCore channel messages](docs/screenshots/mc-messages.png) MeshCore channel | ![MeshCore trace path history](docs/screenshots/mc-route.png) MeshCore two-hop trace and history |
-| ![Protocol log](docs/screenshots/mc-log.png) Protocol log | ![Connect screen](docs/screenshots/connect.png) Connect screen |
+| ![Connect screen](docs/screenshots/connect.png) Connect screen | |
 
 ## Requirements
 
@@ -48,7 +53,7 @@ the radio directly over Web Serial, and everything it keeps stays in the browser
 - A Meshtastic or MeshCore (companion USB firmware) radio connected by USB
 - Demo modes for both protocols work without a radio
 
-Bluetooth, the map view and radio configuration are not implemented yet.
+Bluetooth and radio configuration are not implemented yet.
 
 ## Development
 
