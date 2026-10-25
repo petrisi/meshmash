@@ -4,11 +4,11 @@ import { hex, LeReader, LeWriter, utf8Encode } from '../bytes'
 import { Cmd, TxtType } from './codec'
 
 export const RemoteCmd = {
-  SEND_LOGIN: 26,
+  SEND_LOGIN: Cmd.SEND_LOGIN,
   SEND_STATUS_REQ: Cmd.SEND_STATUS_REQ,
   SEND_TRACE_PATH: Cmd.SEND_TRACE_PATH,
   SEND_TELEMETRY_REQ: Cmd.SEND_TELEMETRY_REQ,
-  SEND_BINARY_REQ: 50,
+  SEND_BINARY_REQ: Cmd.SEND_BINARY_REQ,
 } as const
 
 export const ReqType = { GET_NEIGHBOURS: 0x06, GET_OWNER_INFO: 0x07 } as const
@@ -59,7 +59,7 @@ export const cmdTracePath = (tag: number, hashes: Uint8Array) =>
  * CMD_SEND_CONTROL_DATA with NODE_DISCOVER_REQ, sent zero-hop: [0x80][type mask][tag u32].
  * Full keys in replies (prefix_only = 0); the mask asks every node type.
  */
-export const cmdDiscover = (tag: number) => new LeWriter().u8(55).u8(0x80).u8(0xff).u32(tag).finish()
+export const cmdDiscover = (tag: number) => new LeWriter().u8(Cmd.SEND_CONTROL_DATA).u8(0x80).u8(0xff).u32(tag).finish()
 
 export interface DiscoverReply {
   tag: number

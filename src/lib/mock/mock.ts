@@ -57,7 +57,7 @@ function short(longName: string, len: number) {
   return (parts.map((p) => p[0]).join('') + parts[1].slice(1)).slice(0, len).toUpperCase()
 }
 
-const HOME = { lat: 61.45, lon: 23.85 }
+const HOME = { lat: 61.4978, lon: 23.761 }
 
 export interface MockSession {
   info: RadioInfo

@@ -17,12 +17,18 @@ export const Cmd = {
   SHARE_CONTACT: 16,
   GET_BATT_AND_STORAGE: 20,
   DEVICE_QUERY: 22,
+  SEND_LOGIN: 26,
   SEND_STATUS_REQ: 27,
   GET_CONTACT_BY_KEY: 30,
   GET_CHANNEL: 31,
   SEND_TRACE_PATH: 36,
+  SET_OTHER_PARAMS: 38,
   SEND_TELEMETRY_REQ: 39,
+  SEND_BINARY_REQ: 50,
   SEND_PATH_DISCOVERY_REQ: 52,
+  SEND_CONTROL_DATA: 55,
+  SET_AUTOADD_CONFIG: 58,
+  GET_AUTOADD_CONFIG: 59,
 } as const
 
 export const Resp = {
@@ -425,11 +431,11 @@ export function cmdUpdateContact(c: Contact): Uint8Array {
     .finish()
 }
 
-export const cmdGetAutoAdd = () => Uint8Array.of(59)
-export const cmdSetAutoAdd = (mask: number, maxHops: number) => Uint8Array.of(58, mask, maxHops)
+export const cmdGetAutoAdd = () => Uint8Array.of(Cmd.GET_AUTOADD_CONFIG)
+export const cmdSetAutoAdd = (mask: number, maxHops: number) => Uint8Array.of(Cmd.SET_AUTOADD_CONFIG, mask, maxHops)
 /** CMD_SET_OTHER_PARAMS rewrites all four values; pass the current ones for those not changed. */
 export const cmdSetOtherParams = (manualAdd: number, telemetryModes: number, advertLocPolicy: number, multiAcks: number) =>
-  Uint8Array.of(38, manualAdd, telemetryModes, advertLocPolicy, multiAcks)
+  Uint8Array.of(Cmd.SET_OTHER_PARAMS, manualAdd, telemetryModes, advertLocPolicy, multiAcks)
 
 export const cmdResetPath = (pk: Uint8Array) => new LeWriter().u8(Cmd.RESET_PATH).bytes(pk).finish()
 export const cmdRemoveContact = (pk: Uint8Array) => new LeWriter().u8(Cmd.REMOVE_CONTACT).bytes(pk).finish()
