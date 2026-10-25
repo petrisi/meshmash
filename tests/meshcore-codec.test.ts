@@ -156,9 +156,15 @@ describe('responses', () => {
 
   it('decodes PATH_DISCOVERY_RESPONSE with sized paths', () => {
     const f = new LeWriter().u8(0x8d).u8(0).bytes(prefix).u8(0x42).bytes([0xaa, 0xbb, 0xcc, 0xdd]).u8(0x01).bytes([0x99]).finish()
-    expect(decodePathDiscovery(f)).toEqual({ prefix, out: ['aabb', 'ccdd'], in: ['99'] })
+    expect(decodePathDiscovery(f)).toEqual({
+      prefix,
+      out: ['aabb', 'ccdd'],
+      in: ['99'],
+      outLen: 0x42,
+      outBytes: Uint8Array.of(0xaa, 0xbb, 0xcc, 0xdd),
+    })
     const flood = new LeWriter().u8(0x8d).u8(0).bytes(prefix).u8(OUT_PATH_FLOOD).u8(0).finish()
-    expect(decodePathDiscovery(flood)).toEqual({ prefix, out: undefined, in: [] })
+    expect(decodePathDiscovery(flood)).toEqual({ prefix, out: undefined, in: [], outLen: OUT_PATH_FLOOD, outBytes: new Uint8Array() })
   })
 
   it('decodes LOG_RX_DATA header bits', () => {
