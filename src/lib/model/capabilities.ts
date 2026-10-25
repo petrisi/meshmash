@@ -16,6 +16,8 @@ export interface NodeAction {
   label: string
   primary?: boolean
   danger?: boolean
+  /** Tooltip. */
+  title?: string
 }
 
 function mtPeerActions(node: MeshNode): NodeAction[] {
@@ -39,7 +41,7 @@ const MC_BY_KIND: Partial<Record<NodeKind, NodeAction[]>> = {
     { id: 'path-discovery', label: 'Find path' },
     { id: 'reset-path', label: 'Reset path' },
     { id: 'req-telemetry', label: 'Request telemetry' },
-    { id: 'share', label: 'Share contact' },
+    { id: 'share', label: 'Share contact', title: "Re-send this node's last advert to radios in direct range (zero hop)" },
     { id: 'remove', label: 'Remove contact', danger: true },
   ],
   repeater: [
@@ -51,6 +53,7 @@ const MC_BY_KIND: Partial<Record<NodeKind, NodeAction[]>> = {
     { id: 'trace', label: 'Trace path' },
     { id: 'path-discovery', label: 'Find path' },
     { id: 'reset-path', label: 'Reset path' },
+    { id: 'share', label: 'Share contact', title: "Re-send this node's last advert to radios in direct range (zero hop)" },
     { id: 'remove', label: 'Remove contact', danger: true },
   ],
   room: [
@@ -61,12 +64,14 @@ const MC_BY_KIND: Partial<Record<NodeKind, NodeAction[]>> = {
     { id: 'trace', label: 'Trace path' },
     { id: 'path-discovery', label: 'Find path' },
     { id: 'reset-path', label: 'Reset path' },
+    { id: 'share', label: 'Share contact', title: "Re-send this node's last advert to radios in direct range (zero hop)" },
     { id: 'remove', label: 'Remove contact', danger: true },
   ],
   sensor: [
     { id: 'req-telemetry', label: 'Request telemetry', primary: true },
     { id: 'login', label: 'Log in' },
     { id: 'path-discovery', label: 'Find path' },
+    { id: 'share', label: 'Share contact', title: "Re-send this node's last advert to radios in direct range (zero hop)" },
     { id: 'remove', label: 'Remove contact', danger: true },
   ],
 }

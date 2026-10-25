@@ -678,6 +678,7 @@ export class MeshCoreClient implements RadioClient {
         await this.expect(cmdResetPath(c.publicKey), Resp.OK)
         c.outPathLen = 0xff
         this.sink.node({ id, path: undefined, hops: undefined })
+        this.sink.actionResult(id, action, true, 'Path cleared; the next message floods')
         return
       case 'path-discovery':
         return this.discoverPath(id, c)
@@ -702,7 +703,15 @@ export class MeshCoreClient implements RadioClient {
       case 'trace':
         return this.trace(id, c)
       case 'share':
-        await this.expect(cmdShareContact(c.publicKey), Resp.OK)
+        try {
+          await this.expect(cmdShareContact(c.publicKey), Resp.OK)
+        } catch (e) {
+          // The radio re-sends the advert it stored; it has none for contacts added from a
+          // link, and reports that (or no free packet buffer) as "table full".
+          if (e instanceof CommandError) throw new Error('No advert from this node stored on the radio yet, or the radio is busy')
+          throw e
+        }
+        this.sink.actionResult(id, action, true, 'Advert re-sent to radios in direct range')
         return
       case 'remove':
         await this.expect(cmdRemoveContact(c.publicKey), Resp.OK)

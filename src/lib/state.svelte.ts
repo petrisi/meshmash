@@ -32,11 +32,11 @@ let localSeq = 0
 /** MeshNode fields kept as telemetry history. */
 const SAMPLED = ['batteryPct', 'voltage', 'channelUtil', 'airUtilTx', 'snr', 'rssi'] as const
 const SAMPLES_MAX = 1000
-/** Node actions that wait for an answer from the other node. */
+/** Actions that report a result: shown as pending until the radio or the other node answers. */
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
-  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path', 'discover', 'add-contact',
+  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path', 'discover', 'add-contact', 'share', 'reset-path',
 ])
 /** Likely reasons when a request times out. */
 const TIMEOUT_TEXT: Record<string, string> = {
@@ -648,8 +648,15 @@ class AppState {
       case 'advert-zero':
       case 'advert-flood':
       case 'send-nodeinfo':
-      case 'send-position': {
-        const text = { 'advert-zero': 'Zero-hop advert sent', 'advert-flood': 'Flood advert sent', 'send-nodeinfo': 'Node info broadcast', 'send-position': 'Position broadcast' }[action]
+      case 'send-position':
+      case 'share': {
+        const text = {
+          'advert-zero': 'Zero-hop advert sent',
+          'advert-flood': 'Flood advert sent',
+          'send-nodeinfo': 'Node info broadcast',
+          'send-position': 'Position broadcast',
+          share: 'Advert re-sent to radios in direct range',
+        }[action]
         this.pushLog(text)
         this.#result(nodeId, action, 'ok', text)
         return

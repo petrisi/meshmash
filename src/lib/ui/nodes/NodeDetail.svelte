@@ -79,6 +79,7 @@
       <button
         class:primary={a.primary}
         class:danger={a.danger}
+        title={a.title}
         disabled={!!busy}
         onclick={() => run(a.id)}
       >
