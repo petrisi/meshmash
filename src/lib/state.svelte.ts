@@ -18,6 +18,7 @@ import { detectProtocol } from './protocol/detect'
 import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
+import { redactCli, sanitizeSink } from './sanitize'
 import { loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
@@ -298,7 +299,7 @@ class AppState {
     const persist = (m: Message) => {
       if (radioKey()) void saveMessage(radioKey(), m).catch(() => {})
     }
-    return {
+    return sanitizeSink({
       info: (info, caps) => {
         this.session = { info, caps: { ...capabilitiesFor(info.protocol), ...caps }, transport: t.label }
         const proto = info.protocol === 'meshtastic' ? 'Meshtastic' : 'MeshCore'
@@ -404,7 +405,7 @@ class AppState {
         // USB drops (hub resets, replugs) are common; keep trying for a while.
         if (wasUp && reason) void this.#reconnect(1500, 10 * 60_000)
       },
-    }
+    })
   }
 
   async #teardown() {
@@ -605,7 +606,7 @@ class AppState {
         const remote = this.remote[nodeId]
         void saveNodeData(radio, nodeId, {
           traces: this.traceHistory[nodeId],
-          remote: remote && { ...remote, cli: remote.cli?.slice(-50) },
+          remote: remote && { ...remote, cli: redactCli(remote.cli).slice(-50) },
           samples: this.samples[nodeId],
         }).catch(() => {})
       }, 2000),

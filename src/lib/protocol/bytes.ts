@@ -71,6 +71,7 @@ export class LeReader {
     return v
   }
   bytes(n: number) {
+    if (!Number.isSafeInteger(n) || n < 0) throw new RangeError('bad length')
     if (this.pos + n > this.buf.length) throw new RangeError('read past end')
     const b = this.buf.subarray(this.pos, this.pos + n)
     this.pos += n

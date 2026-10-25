@@ -28,6 +28,7 @@ import {
   ReqType,
 } from './remote'
 import {
+  Cmd,
   cmdAdvert,
   cmdAppStart,
   cmdDeviceQuery,
@@ -104,6 +105,21 @@ class CommandError extends Error {}
 /** Repeaters reply after a random delay of a few seconds. */
 const DISCOVER_LISTEN_MS = 20_000
 
+/**
+ * Login passwords and CLI traffic (which can carry passwords) stay out of the protocol log,
+ * which users copy into bug reports. Returns the frame header to log instead, or null.
+ */
+export function txSecret(p: Uint8Array): Uint8Array | null {
+  if (p[0] === Cmd.SEND_LOGIN) return p.subarray(0, 33)
+  if (p[0] === Cmd.SEND_TXT_MSG && p[1] === TxtType.CLI_DATA) return p.subarray(0, 13)
+  return null
+}
+
+export function rxSecret(f: Uint8Array): Uint8Array | null {
+  const type = f[0] === Resp.CONTACT_MSG_RECV_V3 ? 11 : f[0] === Resp.CONTACT_MSG_RECV ? 8 : -1
+  return type >= 0 && f[type] === TxtType.CLI_DATA ? f.subarray(0, type + 5) : null
+}
+
 export class MeshCoreClient implements RadioClient {
   readonly protocol = 'meshcore' as const
 
@@ -150,7 +166,8 @@ export class MeshCoreClient implements RadioClient {
         continue
       }
       const f = item.payload
-      this.sink.log({ dir: 'rx', kind: codeName(f[0]), summary: this.describe(f), bytes: f })
+      const hidden = rxSecret(f)
+      this.sink.log({ dir: 'rx', kind: codeName(f[0]), summary: hidden ? 'CLI reply, contents not logged' : this.describe(f), bytes: hidden ?? f })
       try {
         if (f[0] >= 0x80) this.onPush(f)
         else this.onResponse(f)
@@ -197,7 +214,8 @@ export class MeshCoreClient implements RadioClient {
           }, timeoutMs),
         }
         this.queue.push(req)
-        this.sink.log({ dir: 'tx', kind: name, summary: '', bytes: payload })
+        const hidden = txSecret(payload)
+        this.sink.log({ dir: 'tx', kind: name, summary: hidden ? 'contents not logged' : '', bytes: hidden ?? payload })
         this.t.write(encodeFrame(payload)).catch((e) => this.finish(req, e))
       })
     const p = this.chain.then(run, run)

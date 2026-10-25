@@ -178,7 +178,13 @@ export class MeshtasticClient implements RadioClient {
         this.sink.log({ dir: 'error', kind: 'FromRadio', summary: `decode failed: ${e}`, bytes: item.payload })
         continue
       }
-      this.sink.log({ dir: 'rx', kind: `FromRadio.${msg.kind}`, summary: this.describe(msg), bytes: item.payload })
+      let summary: string
+      try {
+        summary = this.describe(msg)
+      } catch (e) {
+        summary = `describe failed: ${e}`
+      }
+      this.sink.log({ dir: 'rx', kind: `FromRadio.${msg.kind}`, summary, bytes: item.payload })
       try {
         this.handle(msg)
       } catch (e) {

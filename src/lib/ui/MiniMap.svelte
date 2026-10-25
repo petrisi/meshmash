@@ -8,7 +8,11 @@
     self?: boolean
   }
 
-  let { points, height = 180 }: { points: MapPoint[]; height?: number } = $props()
+  let { points: all, height = 180 }: { points: MapPoint[]; height?: number } = $props()
+  // Positions come from other nodes; anything off the globe would break the tile math.
+  const points = $derived(
+    all.filter(({ pos }) => Number.isFinite(pos.lat) && Number.isFinite(pos.lon) && Math.abs(pos.lat) <= 90 && Math.abs(pos.lon) <= 180),
+  )
 
   const TILE = 256
   const MAX_ZOOM = 15

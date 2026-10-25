@@ -54,6 +54,8 @@ export class PbReader {
   }
 
   bytes(n: number): Uint8Array {
+    // A negative length (a 64-bit varint) would move pos backwards and loop forever.
+    if (!Number.isSafeInteger(n) || n < 0) throw new RangeError('bad field length')
     if (this.pos + n > this.buf.length) throw new RangeError('truncated field')
     const b = this.buf.subarray(this.pos, this.pos + n)
     this.pos += n
