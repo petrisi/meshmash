@@ -9,15 +9,48 @@
   let { thread }: { thread: ThreadKey } = $props()
 
   let scroller: HTMLDivElement
+  let input: HTMLInputElement
   let draft = $state('')
+  let replyTo = $state<Message | null>(null)
+  let picking = $state<string | null>(null)
+  $effect(() => {
+    void thread
+    replyTo = null
+    picking = null
+  })
 
   const msgs = $derived(app.byThread.get(thread) ?? [])
   const isDm = $derived(thread.startsWith('dm:'))
   const peer = $derived(isDm ? app.nodeById.get(thread.slice(3)) : undefined)
   const channel = $derived(isDm ? undefined : app.channels.find((c) => `ch:${c.index}` === thread))
   const title = $derived(peer?.longName ?? channel?.name ?? thread)
-  const bytes = $derived(new TextEncoder().encode(draft).length)
-  const maxBytes = $derived(app.session?.caps.messageMaxBytes ?? 200)
+  const isMt = $derived(app.protocol === 'meshtastic')
+  const nameOf = (m: Message) =>
+    m.from === app.selfId ? 'You' : (app.nodeById.get(m.from)?.longName ?? m.fromName ?? m.from)
+  /** MeshCore has no reply field; the convention is an @[name] mention. */
+  const prefix = $derived(replyTo && !isMt ? `@[${nameOf(replyTo)}] ` : '')
+  const bytes = $derived(new TextEncoder().encode(prefix + draft).length)
+  // MeshCore: channel text carries "<our name>: " (in caps), room posts are capped at 151.
+  const maxBytes = $derived(
+    isMt || !isDm ? (app.session?.caps.messageMaxBytes ?? 200) : peer?.kind === 'room' ? 151 : 160,
+  )
+  const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+  const byPacket = $derived(new Map(msgs.filter((m) => m.packetId !== undefined).map((m) => [m.packetId!, m])))
+
+  /** Splits text into plain parts and @[name] mentions. */
+  function parts(text: string) {
+    return text.split(/(@\[[^\]]+\])/).filter(Boolean)
+  }
+  function grouped(m: Message) {
+    const g = new Map<string, string[]>()
+    for (const r of m.reactions ?? []) g.set(r.emoji, [...(g.get(r.emoji) ?? []), r.from === app.selfId ? 'You' : (app.nodeById.get(r.from)?.longName ?? r.from)])
+    return [...g]
+  }
+  function startReply(m: Message) {
+    replyTo = m
+    picking = null
+    input?.focus()
+  }
 
   // Group consecutive messages from the same sender within 5 min.
   function continues(prev: Message | undefined, m: Message) {
@@ -27,25 +60,42 @@
     return !prev || new Date(prev.ts).toDateString() !== new Date(m.ts).toDateString()
   }
 
-  const isMt = $derived(app.protocol === 'meshtastic')
-
   function hops(m: Message) {
     if (m.hops === undefined) return ''
     return m.hopStart !== undefined ? `${m.hops}/${m.hopStart}` : `${m.hops}`
   }
 
+  // Captured when the thread opens: the divider stays put while reading.
+  const mark = app.readMark?.thread === thread ? app.readMark.ts : null
+  let opened = false
   $effect(() => {
     void msgs.length
-    void thread
-    tick().then(() => scroller && (scroller.scrollTop = scroller.scrollHeight))
+    tick().then(() => {
+      if (!scroller) return
+      if (!opened) {
+        opened = true
+        const target = scroller.querySelector(app.focus ? `#m-${CSS.escape(app.focus.id)}` : '.newdiv')
+        if (target) return target.scrollIntoView({ block: 'center' })
+      } else if (msgs.at(-1)?.from !== app.selfId && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 150) {
+        return // reading older messages: do not jump to new arrivals
+      }
+      scroller.scrollTop = scroller.scrollHeight
+    })
+  })
+  // Search jumps within the open thread.
+  $effect(() => {
+    const f = app.focus
+    if (!f || !opened) return
+    tick().then(() => scroller?.querySelector(`#m-${CSS.escape(f.id)}`)?.scrollIntoView({ block: 'center' }))
   })
 
   function submit(e: SubmitEvent) {
     e.preventDefault()
     const text = draft.trim()
     if (!text || bytes > maxBytes) return
-    app.send(thread, text)
+    app.send(thread, prefix + text, isMt ? (replyTo ?? undefined) : undefined)
     draft = ''
+    replyTo = null
   }
 </script>
 
@@ -59,6 +109,11 @@
       <span class="hash mono">{channel?.kind === 'hashtag' ? '#' : channel?.index}</span>
       <b>{channel?.kind === 'hashtag' ? title.slice(1) : title}</b>
       <span class="faint">{channel?.encryption}</span>
+    {/if}
+    {#if peer && isMt}
+      <span class="faint" title="Meshtastic DMs use the node's public key when both sides know each other's keys">
+        {peer.publicKey ? '🔒 public key' : 'no public key known'}
+      </span>
     {/if}
     <span class="faint count">{msgs.length} messages</span>
   </div>
@@ -81,7 +136,10 @@
       {#if newDay(prev, m)}
         <div class="day"><span>{dayLabel(m.ts)}</span></div>
       {/if}
-      <div class="msg" class:mt={isMt} class:mine class:cont={continues(prev, m) && !newDay(prev, m)}>
+      {#if mark !== null && m.ts > mark && (!prev || prev.ts <= mark)}
+        <div class="day newdiv"><span>New messages</span></div>
+      {/if}
+      <div id="m-{m.id}" class="msg" class:focus={app.focus?.id === m.id} class:mt={isMt} class:mine class:cont={continues(prev, m) && !newDay(prev, m)}>
         <span class="t mono faint">{clock(m.ts)}</span>
         <span class="who">
           {#if !(continues(prev, m) && !newDay(prev, m))}
@@ -91,7 +149,37 @@
             </button>
           {/if}
         </span>
-        <span class="text">{m.text}</span>
+        <span class="text">
+          {#if m.replyTo !== undefined}
+            {@const q = byPacket.get(m.replyTo)}
+            <span class="quote faint">↪ {q ? `${nameOf(q)}: ${q.text}` : 'earlier message'}</span>
+          {/if}
+          {#if m.pki}<span class="lock" title="Encrypted with the public key">🔒</span>{/if}
+          {#each parts(m.text) as p, j (j)}
+            {#if p.startsWith('@[')}<span class="mention" class:me={p === `@[${app.session?.info.longName}]`}>{p}</span>{:else}{p}{/if}
+          {/each}
+          {#if m.reactions?.length}
+            <span class="reacts">
+              {#each grouped(m) as [emoji, who] (emoji)}
+                <span class="react" title={who.join(', ')}>{emoji}{who.length > 1 ? ` ${who.length}` : ''}</span>
+              {/each}
+            </span>
+          {/if}
+          <span class="acts">
+            <button class="ghost" title="Reply" onclick={() => startReply(m)}>↩</button>
+            {#if isMt && m.packetId !== undefined}
+              <button class="ghost" title="React" onclick={() => (picking = picking === m.id ? null : m.id)}>☺</button>
+            {/if}
+            {#if picking === m.id}
+              {#each REACTIONS as e (e)}
+                <button class="ghost" onclick={() => {
+                  app.react(m, e)
+                  picking = null
+                }}>{e}</button>
+              {/each}
+            {/if}
+          </span>
+        </span>
         <span class="c mono muted">{hops(m)}</span>
         <span class="c mono {snrClass(m.snr)}">{m.snr ?? ''}</span>
         {#if isMt}<span class="c mono muted">{m.rssi ?? ''}</span>{/if}
@@ -100,8 +188,18 @@
     {/each}
   </div>
 
+  {#if replyTo}
+    <div class="replying">
+      <span class="faint">Replying to</span>
+      <b>{nameOf(replyTo)}</b>
+      <span class="snip faint">{replyTo.text}</span>
+      <button class="ghost" title="Cancel reply" onclick={() => (replyTo = null)}>✕</button>
+    </div>
+  {/if}
   <form onsubmit={submit}>
     <input
+      bind:this={input}
+      onkeydown={(e) => e.key === 'Escape' && (replyTo = null)}
       bind:value={draft}
       placeholder={isDm ? `Message ${title}` : `Message ${title}`}
       autocomplete="off"
@@ -155,6 +253,21 @@
     margin: 10px 14px 4px;
     font-size: 11px;
     color: var(--faint);
+  }
+  .newdiv {
+    color: var(--accent);
+  }
+  .newdiv::before,
+  .newdiv::after {
+    border-color: var(--accent) !important;
+  }
+  .msg.focus {
+    animation: flash 2.5s ease-out;
+  }
+  @keyframes flash {
+    from {
+      background: var(--accent-soft);
+    }
   }
   .day::before,
   .day::after {
@@ -244,8 +357,69 @@
     color: var(--accent);
   }
   .text {
+    position: relative;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  .quote {
+    display: block;
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lock {
+    font-size: 10px;
+    margin-right: 4px;
+  }
+  .mention {
+    color: var(--accent);
+  }
+  .mention.me {
+    font-weight: 700;
+  }
+  .reacts {
+    display: flex;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .react {
+    font-size: 12px;
+    padding: 0 5px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+  }
+  .acts {
+    position: absolute;
+    top: -2px;
+    right: 0;
+    display: none;
+    gap: 2px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .acts button {
+    padding: 0 5px;
+    border: none;
+  }
+  .msg:hover .acts {
+    display: flex;
+  }
+  .replying {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 14px 0;
+    font-size: 12px;
+    min-width: 0;
+  }
+  .snip {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   form {
     display: flex;

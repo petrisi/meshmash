@@ -478,11 +478,17 @@ export interface OutPacket {
   portnum: number
   payload: Uint8Array
   wantResponse?: boolean
+  /** Data.reply_id: the packet this answers. */
+  replyId?: number
+  /** Data.emoji: non-zero marks the text as a reaction to reply_id. */
+  emoji?: number
 }
 
 export function toRadioPacket(p: OutPacket): Uint8Array {
   const data = new PbWriter().uint(1, p.portnum).bytes(2, p.payload)
   if (p.wantResponse) data.bool(3, true)
+  if (p.replyId) data.fixed32(7, p.replyId)
+  if (p.emoji) data.fixed32(8, p.emoji)
   const pkt = new PbWriter().fixed32(2, p.to)
   if (p.channel) pkt.uint(3, p.channel)
   pkt.message(4, data).fixed32(6, p.id)

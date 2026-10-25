@@ -89,6 +89,15 @@ export interface Message {
   repeats?: number
   /** Outgoing: the repeat-listening window has closed. */
   settled?: boolean
+  /** Meshtastic packet id, for replies and reactions. */
+  packetId?: number
+  /** Meshtastic: packet id of the message this one answers. */
+  replyTo?: number
+  /** Incoming only, transient: this is a reaction to `replyTo`, not a message. */
+  reaction?: boolean
+  reactions?: { emoji: string; from: string; ts: number }[]
+  /** Meshtastic DM encrypted with the node's public key (PKI). */
+  pki?: boolean
 }
 
 export interface RadioParams {

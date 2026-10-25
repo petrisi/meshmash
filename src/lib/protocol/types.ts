@@ -54,6 +54,13 @@ export interface Probe {
   textLogged: number
 }
 
+export interface SendOptions {
+  /** Meshtastic packet id being answered. */
+  replyTo?: number
+  /** Send as a reaction to `replyTo` (Meshtastic). */
+  reaction?: boolean
+}
+
 export interface RadioClient {
   readonly protocol: Protocol
   /**
@@ -63,7 +70,7 @@ export interface RadioClient {
   start(probe?: Probe): Promise<void>
   close(): Promise<void>
   /** localId is the id the UI already gave the pending message. */
-  sendText(thread: ThreadKey, text: string, localId: string): Promise<void>
+  sendText(thread: ThreadKey, text: string, localId: string, opts?: SendOptions): Promise<void>
   action(action: string, nodeId: string): Promise<void>
   /** Log in to a server node; the outcome arrives as an actionResult for 'login'. */
   login?(nodeId: string, password: string): Promise<void>

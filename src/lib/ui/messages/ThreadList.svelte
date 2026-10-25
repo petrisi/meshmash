@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ago } from '../../format'
-  import type { ThreadKey } from '../../model/types'
+  import type { Message, ThreadKey } from '../../model/types'
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
 
@@ -13,6 +13,25 @@
       .sort((a, b) => (b.last?.ts ?? Number.MAX_SAFE_INTEGER) - (a.last?.ts ?? Number.MAX_SAFE_INTEGER)),
   )
 
+  let query = $state('')
+  const results = $derived.by(() => {
+    const q = query.trim().toLocaleLowerCase()
+    if (!q) return []
+    const out = []
+    for (let i = app.messages.length - 1; i >= 0 && out.length < 100; i--) {
+      const m = app.messages[i]
+      if (m.text.toLocaleLowerCase().includes(q)) out.push(m)
+    }
+    return out
+  })
+  function threadName(k: ThreadKey) {
+    if (k.startsWith('dm:')) return app.nodeById.get(k.slice(3))?.longName ?? k.slice(3)
+    return app.channels.find((c) => `ch:${c.index}` === k)?.name ?? k
+  }
+  function sender(m: Message) {
+    return m.from === app.selfId ? 'You' : (app.nodeById.get(m.from)?.shortName ?? m.fromName ?? '?')
+  }
+
   function preview(k: ThreadKey) {
     const m = lastOf(k)
     if (!m) return ''
@@ -22,6 +41,32 @@
 </script>
 
 <aside>
+  <input
+    class="search"
+    type="search"
+    placeholder="Search messages"
+    bind:value={query}
+    onkeydown={(e) => e.key === 'Escape' && (query = '')}
+  />
+  {#if query.trim()}
+    <div class="section">
+      <span>Results</span>
+      <span class="faint">{results.length}{results.length === 100 ? '+' : ''}</span>
+    </div>
+    {#each results as m (m.id)}
+      <button class="row ghost" class:active={app.focus?.id === m.id} onclick={() => app.showMessage(m)}>
+        <span class="main">
+          <span class="top">
+            <span class="name">{threadName(m.thread)}</span>
+            <span class="time faint">{ago(m.ts, app.now)}</span>
+          </span>
+          <span class="preview muted">{sender(m)}: {m.text}</span>
+        </span>
+      </button>
+    {:else}
+      <p class="faint empty">No messages match.</p>
+    {/each}
+  {:else}
   <div class="section">
     <span>Channels</span>
     <span class="faint">{app.channels.length}/{app.session?.caps.maxChannels}</span>
@@ -64,6 +109,7 @@
   {:else}
     <p class="faint empty">Open a node and choose “Direct message”.</p>
   {/each}
+  {/if}
 </aside>
 
 <style>
@@ -72,6 +118,11 @@
     background: var(--panel);
     border-right: 1px solid var(--border);
     padding-bottom: 8px;
+  }
+  .search {
+    width: calc(100% - 16px);
+    margin: 8px 8px 2px;
+    padding: 5px 8px;
   }
   .row {
     width: 100%;

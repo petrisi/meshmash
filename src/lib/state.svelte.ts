@@ -18,6 +18,7 @@ import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, RadioClient, RadioSink } from './protocol/types'
 import { loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
+import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
@@ -58,6 +59,10 @@ class AppState {
   /** DM threads the user keeps open, newest activity first via `threads`. */
   dmPeers = $state<string[]>([])
   lastRead = $state<Record<string, number>>({})
+  /** Where the reader left off in the thread just opened, for the "New messages" divider. */
+  readMark = $state<{ thread: ThreadKey; ts: number } | null>(null)
+  /** Message to scroll to and highlight (from search). */
+  focus = $state<{ id: string; at: number } | null>(null)
   traceroutes = $state<Record<string, TracerouteResult>>({})
   /** Newest first, per node, this session. */
   traceHistory = $state<Record<string, TracerouteResult[]>>({})
@@ -143,7 +148,8 @@ class AppState {
   }
 
   #heardOn(thread: string, nodeId: string, ts: number) {
-    const ch = (this.channelHeard[thread] ??= {})
+    this.channelHeard[thread] ??= {}
+    const ch = this.channelHeard[thread] // the proxy, not the object literal
     if ((ch[nodeId] ?? 0) < ts) ch[nodeId] = ts
   }
 
@@ -315,6 +321,7 @@ class AppState {
         this.channels = list
       },
       message: (m) => {
+        if (m.reaction) return this.#addReaction(m)
         if (this.messages.some((x) => x.id === m.id)) return
         this.messages.push(m)
         persist(m)
@@ -352,7 +359,8 @@ class AppState {
         this.#saveNode(nodeId)
       },
       cliLine: (nodeId, dir, text) => {
-        const r = (this.remote[nodeId] ??= {})
+        this.remote[nodeId] ??= {}
+        const r = this.remote[nodeId]
         r.cli = [...(r.cli ?? []), { ts: Date.now(), dir, text }].slice(-200)
         this.#saveNode(nodeId)
       },
@@ -376,7 +384,9 @@ class AppState {
         this.messages = [...history.filter((m) => !ids.has(m.id)), ...this.messages].sort((a, b) => a.ts - b.ts)
         const dms = this.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3))
         this.dmPeers = [...new Set(dms)]
-        this.lastRead = Object.fromEntries([...this.byThread.keys()].map((k) => [k, Date.now()]))
+        // Threads never opened on this radio start as read.
+        const read = loadLastRead(radioKey())
+        this.lastRead = Object.fromEntries([...this.byThread.keys()].map((k) => [k, read[k] ?? Date.now()]))
         this.view = 'messages'
         this.activeThread = this.channels[0] ? `ch:${this.channels[0].index}` : null
         this.selectedNode = null
@@ -442,12 +452,22 @@ class AppState {
 
   markRead(thread: ThreadKey) {
     this.lastRead[thread] = Date.now()
+    if (this.session && !this.isDemo) saveLastRead(this.session.info.nodeId, this.lastRead)
   }
 
   openThread(thread: ThreadKey) {
+    this.readMark = this.unread(thread) ? { thread, ts: this.lastRead[thread] ?? 0 } : null
     this.activeThread = thread
     this.view = 'messages'
     this.markRead(thread)
+  }
+
+  /** Opens a message's thread and scrolls to it. */
+  showMessage(m: Message) {
+    if (m.thread.startsWith('dm:') && !this.dmPeers.includes(m.thread.slice(3))) this.dmPeers = [m.thread.slice(3), ...this.dmPeers]
+    this.openThread(m.thread)
+    this.readMark = null
+    this.focus = { id: m.id, at: Date.now() }
   }
 
   openDm(nodeId: string) {
@@ -465,14 +485,36 @@ class AppState {
     this.view = 'nodes'
   }
 
-  send(thread: ThreadKey, text: string) {
+  /** Reactions attach to the message they answer; unknown targets are dropped. */
+  #addReaction(r: Message) {
+    const target = this.messages.find((x) => x.thread === r.thread && x.packetId === r.replyTo)
+    if (!target) return
+    const list = target.reactions ?? []
+    if (list.some((x) => x.from === r.from && x.emoji === r.text)) return
+    // Assign, not push: state proxies wrap a copy of an array assigned to them.
+    target.reactions = [...list, { emoji: r.text, from: r.from, ts: r.ts }]
+    if (this.session) void saveMessage(this.session.info.nodeId, target).catch(() => {})
+  }
+
+  /** Meshtastic: react to a message with an emoji. */
+  react(target: Message, emoji: string) {
+    if (!this.#client || target.packetId === undefined) return
+    const r: Message = { id: '', thread: target.thread, from: this.selfId, text: emoji, ts: Date.now(), status: 'sent', replyTo: target.packetId, reaction: true }
+    this.#addReaction(r)
     const id = `local-${Date.now()}-${++localSeq}`
-    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0 }
+    this.#client
+      .sendText(target.thread, emoji, id, { replyTo: target.packetId, reaction: true })
+      .catch((e) => this.#log({ dir: 'error', kind: 'react', summary: String(e) }))
+  }
+
+  send(thread: ThreadKey, text: string, replyTo?: Message) {
+    const id = `local-${Date.now()}-${++localSeq}`
+    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0, replyTo: replyTo?.packetId }
     this.messages.push(msg)
     this.markRead(thread)
     if (this.#client) {
       void saveMessage(this.session!.info.nodeId, msg).catch(() => {})
-      this.#client.sendText(thread, text, id).catch((e) => {
+      this.#client.sendText(thread, text, id, { replyTo: replyTo?.packetId }).catch((e) => {
         const m = this.messages.find((x) => x.id === id)
         if (m) Object.assign(m, { status: 'failed', settled: true })
         this.#log({ dir: 'error', kind: 'send', summary: String(e) })
@@ -524,7 +566,8 @@ class AppState {
 
   /** Coalesces samples less than a minute apart into one. */
   #sample(nodeId: string, v: Record<string, number>) {
-    const list = (this.samples[nodeId] ??= [])
+    this.samples[nodeId] ??= []
+    const list = this.samples[nodeId] // the proxy, not the array literal
     const last = list.at(-1)
     if (last && Date.now() - last.ts < 60_000) Object.assign(last.v, v)
     else list.push({ ts: Date.now(), v })

@@ -2,7 +2,7 @@ import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
 import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import { hex, utf8Decode, utf8Encode } from '../bytes'
-import type { Probe, RadioClient, RadioSink } from '../types'
+import type { Probe, RadioClient, RadioSink, SendOptions } from '../types'
 import type { SerialTransport } from '../../transport/serial'
 import {
   Admin,
@@ -385,6 +385,10 @@ export class MeshtasticClient implements RadioClient {
           hopStart: p.hopStart || undefined,
           snr: p.rxSnr || undefined,
           rssi: p.rxRssi || undefined,
+          packetId: p.id,
+          replyTo: d.replyId || undefined,
+          reaction: !!d.emoji && !!d.replyId,
+          pki: p.pkiEncrypted || undefined,
         })
         return
       }
@@ -498,7 +502,7 @@ export class MeshtasticClient implements RadioClient {
     to: number,
     portnum: number,
     payload: Uint8Array,
-    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean } = {},
+    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number } = {},
   ): Promise<number> {
     const id = this.packetId()
     const written = this.txChain.then(async () => {
@@ -535,7 +539,7 @@ export class MeshtasticClient implements RadioClient {
     to: number,
     portnum: number,
     payload: Uint8Array,
-    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean },
+    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number },
   ) {
     await this.send(
       toRadioPacket({
@@ -544,6 +548,8 @@ export class MeshtasticClient implements RadioClient {
         id,
         wantAck: opts.wantAck ?? false,
         wantResponse: opts.wantResponse,
+        replyId: opts.replyId,
+        emoji: opts.emoji,
         hopLimit: this.lora.hopLimit || 3,
         portnum,
         payload,
@@ -552,11 +558,17 @@ export class MeshtasticClient implements RadioClient {
     )
   }
 
-  async sendText(thread: ThreadKey, text: string, localId: string) {
+  async sendText(thread: ThreadKey, text: string, localId: string, opts: SendOptions = {}) {
     const isDm = thread.startsWith('dm:')
     const to = isDm ? nodeNum(thread.slice(3)) : BROADCAST
     const channel = isDm ? 0 : Number(thread.slice(3))
-    const id = await this.sendPacket(to, Port.TEXT, utf8Encode(text), { channel, wantAck: true })
+    const id = await this.sendPacket(to, Port.TEXT, utf8Encode(text), {
+      channel,
+      wantAck: true,
+      replyId: opts.replyTo,
+      emoji: opts.reaction ? 1 : undefined,
+    })
+    this.sink.updateMessage(localId, { packetId: id })
     // Some boards read serial input only every ~20 s; stay 'pending' until the radio takes it.
     this.pending.set(id, { localId, to, accepted: false, timer: setTimeout(() => this.accept(id), ACCEPT_TIMEOUT_MS) })
   }
