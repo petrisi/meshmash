@@ -3,6 +3,7 @@ import type {
   ActionResult,
   Capabilities,
   Channel,
+  ContactSettings,
   MeshNode,
   Message,
   Protocol,
@@ -34,7 +35,7 @@ const SAMPLES_MAX = 1000
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
-  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path', 'discover',
+  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path', 'discover', 'add-contact',
 ])
 /** Likely reasons when a request times out. */
 const TIMEOUT_TEXT: Record<string, string> = {
@@ -558,6 +559,20 @@ class AppState {
       if (this.results[nodeId]?.login?.ts === r.ts) this.#result(nodeId, 'login', 'failed', 'No answer')
     }, REQUEST_TIMEOUT_MS)
     this.#client.login(nodeId, password).catch((e) => this.#result(nodeId, 'login', 'failed', String(e?.message ?? e)))
+  }
+
+  get canManageContacts() {
+    return !!this.#client?.getContactSettings
+  }
+  getContactSettings() {
+    return this.#client?.getContactSettings?.() ?? Promise.reject(new Error('not supported'))
+  }
+  setContactSettings(s: ContactSettings) {
+    return this.#client?.setContactSettings?.(s) ?? Promise.reject(new Error('not supported'))
+  }
+  /** Resolves with the new contact's node id. */
+  importContact(link: string) {
+    return this.#client?.importContact?.(link) ?? Promise.reject(new Error('not supported'))
   }
 
   cli(nodeId: string, text: string) {

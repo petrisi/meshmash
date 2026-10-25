@@ -86,6 +86,7 @@ export function radioActions(protocol: Protocol): NodeAction[] {
 }
 
 export function nodeActions(protocol: Protocol, node: MeshNode, isSelf: boolean): NodeAction[] {
+  if (node.unsaved) return [{ id: 'add-contact', label: 'Add contact', primary: true }]
   if (isSelf) return [...radioActions(protocol), { id: 'configure', label: 'Configure radio' }]
   if (protocol === 'meshtastic') return mtPeerActions(node)
   return MC_BY_KIND[node.kind] ?? MC_BY_KIND.chat!

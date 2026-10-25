@@ -7,6 +7,8 @@
   import MiniMap, { type MapPoint } from '../MiniMap.svelte'
   import RemotePanel from './RemotePanel.svelte'
   import RouteView from './RouteView.svelte'
+  import ContactSettingsPanel from './ContactSettingsPanel.svelte'
+  import { contactLink } from '../../protocol/meshcore/links'
 
   let { node, compact = false }: { node: MeshNode; compact?: boolean } = $props()
 
@@ -21,6 +23,15 @@
       .sort((a, b) => b.ts - a.ts)
       .slice(0, 4),
   )
+  let copied = $state(false)
+  const LINK_TYPE: Partial<Record<string, number>> = { chat: 1, repeater: 2, room: 3, sensor: 4 }
+  async function copyLink() {
+    await navigator.clipboard.writeText(
+      contactLink({ name: node.longName, publicKey: node.publicKey!, type: LINK_TYPE[node.kind] ?? 1 }),
+    )
+    copied = true
+    setTimeout(() => (copied = false), 1500)
+  }
   let loginOpen = $state(false)
   $effect(() => {
     void node.id
@@ -46,7 +57,12 @@
         {#if node.favorite}<span class="star" title="Favorite">★</span>{/if}
         {#if node.ignored}<span class="ign">IGNORED</span>{/if}
       </div>
-      <div class="mono muted">{node.id}{isSelf ? ' · this radio' : ''}</div>
+      <div class="mono muted">
+        {node.id}{isSelf ? ' · this radio' : ''}{node.unsaved ? ' · not saved' : ''}
+        {#if proto === 'meshcore' && node.publicKey}
+          <button class="ghost link" title="Copy a meshcore://contact/add link for sharing" onclick={copyLink}>{copied ? 'copied' : 'copy link'}</button>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -77,6 +93,7 @@
   {/if}
 
   <RemotePanel {node} bind:loginOpen />
+  {#if isSelf && !compact && app.canManageContacts}<ContactSettingsPanel />{/if}
 
   <RouteView nodeId={node.id} />
 
@@ -164,6 +181,12 @@
     background: var(--danger);
     color: var(--bg);
     vertical-align: middle;
+  }
+  .link {
+    padding: 0 4px;
+    border: none;
+    font-size: 11px;
+    color: var(--accent);
   }
   .actions {
     display: flex;

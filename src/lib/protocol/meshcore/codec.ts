@@ -43,6 +43,7 @@ export const Resp = {
   CONTACT_MSG_RECV_V3: 16,
   CHANNEL_MSG_RECV_V3: 17,
   CHANNEL_INFO: 18,
+  AUTOADD_CONFIG: 25,
 } as const
 
 export const Push = {
@@ -423,6 +424,12 @@ export function cmdUpdateContact(c: Contact): Uint8Array {
     .u32(c.lastMod)
     .finish()
 }
+
+export const cmdGetAutoAdd = () => Uint8Array.of(59)
+export const cmdSetAutoAdd = (mask: number, maxHops: number) => Uint8Array.of(58, mask, maxHops)
+/** CMD_SET_OTHER_PARAMS rewrites all four values; pass the current ones for those not changed. */
+export const cmdSetOtherParams = (manualAdd: number, telemetryModes: number, advertLocPolicy: number, multiAcks: number) =>
+  Uint8Array.of(38, manualAdd, telemetryModes, advertLocPolicy, multiAcks)
 
 export const cmdResetPath = (pk: Uint8Array) => new LeWriter().u8(Cmd.RESET_PATH).bytes(pk).finish()
 export const cmdRemoveContact = (pk: Uint8Array) => new LeWriter().u8(Cmd.REMOVE_CONTACT).bytes(pk).finish()

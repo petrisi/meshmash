@@ -5,11 +5,25 @@
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
   import NodeDetail from './NodeDetail.svelte'
+  import { parseContactLink } from '../../protocol/meshcore/links'
 
   type SortKey = 'name' | 'kind' | 'hw' | 'heard' | 'hops' | 'snr' | 'rssi' | 'batt' | 'dist'
   type Col = { key: SortKey; label: string; num?: boolean }
 
   let query = $state('')
+  // A pasted meshcore://contact/add link offers to add that contact.
+  const link = $derived(app.canManageContacts ? parseContactLink(query) : null)
+  let importError = $state('')
+  async function importLink() {
+    importError = ''
+    try {
+      const id = await app.importContact(query)
+      query = ''
+      app.showNode(id)
+    } catch (e) {
+      importError = e instanceof Error ? e.message : String(e)
+    }
+  }
   let filter = $state<string>('all')
   let sortKey = $state<SortKey>('heard')
   let sortAsc = $state(false)
@@ -125,7 +139,14 @@
 <div class="grid">
   <section>
     <div class="toolbar">
-      <input placeholder="Filter by name or id" bind:value={query} />
+      <input
+        placeholder={app.canManageContacts ? 'Filter, or paste a meshcore:// contact link' : 'Filter by name or id'}
+        bind:value={query}
+      />
+      {#if link}
+        <button class="primary" onclick={importLink}>Add contact “{link.name || link.publicKey.slice(0, 12)}”</button>
+        {#if importError}<span class="poor">{importError}</span>{/if}
+      {/if}
       <div class="chips">
         {#each filters as f (f.id)}
           <button class:on={filter === f.id} onclick={() => (filter = f.id)}>

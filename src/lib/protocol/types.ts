@@ -1,6 +1,7 @@
 import type {
   Capabilities,
   Channel,
+  ContactSettings,
   MeshNode,
   Message,
   Protocol,
@@ -74,6 +75,11 @@ export interface RadioClient {
   action(action: string, nodeId: string): Promise<void>
   /** Log in to a server node; the outcome arrives as an actionResult for 'login'. */
   login?(nodeId: string, password: string): Promise<void>
+  /** MeshCore contact handling. */
+  getContactSettings?(): Promise<ContactSettings>
+  setContactSettings?(s: ContactSettings): Promise<void>
+  /** Adds a contact from a meshcore://contact/add link. */
+  importContact?(link: string): Promise<string>
   /** Send a CLI command to a server node we administer. */
   cli?(nodeId: string, text: string): Promise<void>
 }

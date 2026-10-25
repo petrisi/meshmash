@@ -20,6 +20,19 @@ export interface Position {
   alt?: number
 }
 
+export interface ContactSettings {
+  /** Off: every advert is added. On: only the types below. */
+  manual: boolean
+  chat: boolean
+  repeater: boolean
+  room: boolean
+  sensor: boolean
+  /** When the table is full, replace the oldest non-favourite contact. */
+  overwriteOldest: boolean
+  /** 0 = any distance, 1 = direct only, N = up to N-1 hops. */
+  maxHops: number
+}
+
 export interface MeshNode {
   /** Stable key: Meshtastic "!hex" node id, MeshCore public key prefix. */
   id: string
@@ -48,6 +61,8 @@ export interface MeshNode {
   /** Meshtastic: packets from this node are dropped by our radio. */
   ignored?: boolean
   viaMqtt?: boolean
+  /** MeshCore: heard, but not in the radio's contacts (manual add mode or table full). */
+  unsaved?: boolean
 }
 
 export type ChannelKind = 'primary' | 'secondary' | 'public' | 'hashtag' | 'private'

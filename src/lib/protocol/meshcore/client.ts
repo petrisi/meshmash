@@ -1,10 +1,11 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
-import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
+import type { Channel, ContactSettings, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { SerialTransport } from '../../transport/serial'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { RadioClient, RadioSink } from '../types'
 import { type ClockFix, clockFixes, correctRadioSecs, recordClockFix } from './clockFix'
+import { parseContactLink } from './links'
 import {
   cmdBinaryReq,
   cmdLogin,
@@ -58,6 +59,9 @@ import {
   decodeSelfInfo,
   decodeSent,
   cmdUpdateContact,
+  cmdGetAutoAdd,
+  cmdSetAutoAdd,
+  cmdSetOtherParams,
   OUT_PATH_FLOOD,
   groupTextCiphertext,
   PayloadType,
@@ -116,6 +120,7 @@ export class MeshCoreClient implements RadioClient {
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
   /** Routes found by path discovery, kept for "Use this path". */
+  private unsaved = new Map<string, Contact>()
   private discovering: { tag: number; found: Map<string, DiscoverReply> } | null = null
   private discovered = new Map<string, { outLen: number; outBytes: Uint8Array }>()
   private secrets = new Map<number, Uint8Array>()
@@ -439,10 +444,13 @@ export class MeshCoreClient implements RadioClient {
         void this.syncMessages()
         return
       case Push.NEW_ADVERT: {
+        // Heard but not added to the radio's contacts; kept so it can be added.
         const c = decodeContact(f)
-        this.contacts.set(idOf(c.publicKey), c)
-        this.sink.node({ ...this.toNode(c), lastHeard: Date.now() })
-        this.sink.heard(idOf(c.publicKey), Date.now())
+        const id = idOf(c.publicKey)
+        if (this.contacts.has(id)) return
+        this.unsaved.set(id, c)
+        this.sink.node({ ...this.toNode(c), lastHeard: Date.now(), unsaved: true })
+        this.sink.heard(id, Date.now())
         return
       }
       case Push.ADVERT:
@@ -633,6 +641,13 @@ export class MeshCoreClient implements RadioClient {
     switch (action) {
       case 'discover':
         return this.discoverNearby(id)
+      case 'add-contact': {
+        const c = this.unsaved.get(id)
+        if (!c) throw new Error('Not an unsaved node')
+        await this.saveContact(c)
+        this.sink.actionResult(id, action, true, 'Added to contacts')
+        return
+      }
       case 'advert-zero':
       case 'advert-flood':
         await this.expect(cmdAdvert(action === 'advert-flood'), Resp.OK)
@@ -788,6 +803,62 @@ export class MeshCoreClient implements RadioClient {
     const text = new TextDecoder().decode(body).replace(/\0+$/, '')
     this.sink.remote(id, { owner: { ts: Date.now(), text } })
     this.sink.actionResult(id, 'req-owner', true, 'Owner info received')
+  }
+
+  private async saveContact(c: Contact) {
+    const id = idOf(c.publicKey)
+    await this.expect(cmdUpdateContact({ ...c, lastMod: c.lastMod || Math.floor((Date.now() + this.clockOffset) / 1000) }), Resp.OK)
+    this.unsaved.delete(id)
+    this.contacts.set(id, c)
+    this.sink.node({ ...this.toNode(c), unsaved: false })
+  }
+
+  async importContact(link: string): Promise<string> {
+    const l = parseContactLink(link)
+    if (!l) throw new Error('Not a meshcore://contact/add link')
+    const pk = Uint8Array.from(l.publicKey.match(/../g)!.map((h) => parseInt(h, 16)))
+    const id = idOf(pk)
+    const existing = this.contacts.get(id)
+    if (existing) return id
+    await this.saveContact({
+      publicKey: pk,
+      type: l.type,
+      flags: 0,
+      outPathLen: OUT_PATH_FLOOD,
+      outPath: new Uint8Array(),
+      name: l.name,
+      lastAdvert: 0,
+      lat: 0,
+      lon: 0,
+      lastMod: 0,
+    })
+    return id
+  }
+
+  async getContactSettings(): Promise<ContactSettings> {
+    const f = await this.expect(cmdGetAutoAdd(), Resp.AUTOADD_CONFIG)
+    const mask = f[1] ?? 0
+    return {
+      manual: (this.self?.manualAddContacts ?? 0) & 1 ? true : false,
+      overwriteOldest: !!(mask & 0x01),
+      chat: !!(mask & 0x02),
+      repeater: !!(mask & 0x04),
+      room: !!(mask & 0x08),
+      sensor: !!(mask & 0x10),
+      maxHops: f[2] ?? 0,
+    }
+  }
+
+  async setContactSettings(s: ContactSettings) {
+    const self = this.self
+    if (!self) throw new Error('not connected')
+    const mask = (s.overwriteOldest ? 1 : 0) | (s.chat ? 2 : 0) | (s.repeater ? 4 : 0) | (s.room ? 8 : 0) | (s.sensor ? 0x10 : 0)
+    await this.expect(cmdSetAutoAdd(mask, Math.max(0, Math.min(64, s.maxHops))), Resp.OK)
+    const manual = s.manual ? 1 : 0
+    if (manual !== (self.manualAddContacts & 1)) {
+      await this.expect(cmdSetOtherParams(manual, self.telemetryModes, self.advertLocPolicy, self.multiAcks), Resp.OK)
+      self.manualAddContacts = manual
+    }
   }
 
   /** Asks nodes in direct range to identify themselves; repeaters answer after a random delay. */
