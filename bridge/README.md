@@ -8,19 +8,24 @@ the meshmash page and the radio's TCP port. It does not read or store your messa
 meshmash page  ──WebSocket 127.0.0.1:4404──▶  meshmash-bridge  ──TCP──▶  radio on WiFi
 ```
 
-Works on Windows and Linux (macOS untested).
+Works on Windows and Linux (macOS untested). The bridge runs on the same computer as the
+browser, not on the server that hosts the meshmash pages.
 
 ## Requirements
 
-- Node.js 22.18 or newer (Node 24 LTS recommended): <https://nodejs.org/>
-- A radio on your WiFi network:
+- Node.js 22.18 or newer (Node 24 LTS recommended): <https://nodejs.org/en/download>
+- Git: <https://git-scm.com/downloads>. Without Git, download the repository as a ZIP from
+  GitHub (**Code → Download ZIP**). On Linux, both are also in the distribution's package manager.
+- A radio with WiFi. ESP32-based radios generally have it (Heltec V3/V4, T-Beam, XIAO ESP32-S3
+  and others); nRF52-based radios (RAK4631, T-Echo, XIAO nRF52840 and others) have none.
+- The radio on your WiFi network:
   - **Meshtastic:** WiFi enabled in the network settings (official app or CLI). The radio
     listens on TCP port 4403. On ESP32 boards, Bluetooth is off while WiFi is on.
   - **MeshCore:** a companion WiFi firmware build (`*_companion_radio_wifi`), with the network
     name and password set at build time (`WIFI_SSID`, `WIFI_PWD`). The radio listens on TCP
     port 5000.
-- The radio's address. A fixed address (DHCP reservation in your router) saves editing the
-  config later.
+- The radio's IP address. Give it a fixed one (a DHCP reservation in your router) so the bridge
+  config stays valid.
 
 ## Install
 
@@ -33,14 +38,14 @@ npm install
 ## Add your radios
 
 ```sh
-node src/cli.ts add "Home base" 192.168.1.50:5000     # MeshCore
-node src/cli.ts add Tracker 192.168.1.51:4403         # Meshtastic
+node src/cli.ts add "Home base" 192.168.1.50:5000          # MeshCore
+node src/cli.ts add "Backyard radio" 192.168.1.51:4403     # Meshtastic
 node src/cli.ts list
 ```
 
 The protocol follows from the port: 4403 is Meshtastic, 5000 is MeshCore. For another port,
 add `--meshtastic` or `--meshcore`. Without a port, give the protocol and the default port is
-used: `node src/cli.ts add Tracker 192.168.1.51 --meshtastic`.
+used: `node src/cli.ts add "Backyard radio" 192.168.1.51 --meshtastic`.
 
 Remove one with `node src/cli.ts remove "Home base"`.
 
