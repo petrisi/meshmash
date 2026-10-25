@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig, type Plugin } from 'vite'
+
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 
 // Production builds only: the dev server needs inline scripts and a websocket for HMR.
 // The page needs nothing beyond its own files and OpenStreetMap tiles.
@@ -24,4 +27,5 @@ const csp = (): Plugin => ({
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte(), csp()],
+  define: { __APP_VERSION__: JSON.stringify(version) },
 })

@@ -35,7 +35,7 @@
 
 <div class="wrap">
   <div class="card">
-    <h1>meshmash</h1>
+    <h1>meshmash <span class="version mono">v{__APP_VERSION__}</span></h1>
     <p class="muted">Web client for Meshtastic® and MeshCore radios.</p>
 
     {#if app.reconnecting && !app.connecting}
@@ -112,6 +112,12 @@
     margin: 0;
     font-size: 22px;
     letter-spacing: -0.01em;
+  }
+  .version {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--faint);
+    letter-spacing: 0;
   }
   p {
     margin: 0;
