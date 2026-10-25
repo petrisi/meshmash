@@ -135,7 +135,12 @@ export interface RemoteData {
   login?: { role: string; ts: number }
   status?: { ts: number; fields: { label: string; value: string }[] }
   telemetry?: { ts: number; readings: { channel: number; type: number; name: string; value: string }[] }
-  neighbours?: { ts: number; total: number; list: { id: string; heardSecsAgo: number; snr: number }[] }
+  neighbours?: {
+    ts: number
+    total: number
+    /** snrThere: how that node heard us (discovery only). */
+    list: { id: string; heardSecsAgo: number; snr: number; snrThere?: number }[]
+  }
   owner?: { ts: number; text: string }
   cli?: { ts: number; dir: 'out' | 'in'; text: string }[]
 }

@@ -11,8 +11,11 @@ import {
   cmdSendCli,
   cmdStatusReq,
   cmdTelemetryReq,
+  cmdDiscover,
   cmdTracePath,
   decodeBinaryResponse,
+  decodeDiscoverReply,
+  type DiscoverReply,
   decodeLoginSuccess,
   decodeLpp,
   decodeNeighbours,
@@ -94,6 +97,9 @@ interface Request {
 
 class CommandError extends Error {}
 
+/** Repeaters reply after a random delay of a few seconds. */
+const DISCOVER_LISTEN_MS = 20_000
+
 export class MeshCoreClient implements RadioClient {
   readonly protocol = 'meshcore' as const
 
@@ -110,6 +116,7 @@ export class MeshCoreClient implements RadioClient {
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
   /** Routes found by path discovery, kept for "Use this path". */
+  private discovering: { tag: number; found: Map<string, DiscoverReply> } | null = null
   private discovered = new Map<string, { outLen: number; outBytes: Uint8Array }>()
   private secrets = new Map<number, Uint8Array>()
   /**
@@ -467,6 +474,14 @@ export class MeshCoreClient implements RadioClient {
         if (w && w.codes.includes(f[0]) && w.match(f)) w.done(f)
         return
       }
+      case Push.CONTROL_DATA: {
+        const d = decodeDiscoverReply(f)
+        if (d && this.discovering?.tag === d.tag) {
+          this.discovering.found.set(hex(d.publicKey.subarray(0, 6)), d)
+          this.publishDiscovery()
+        }
+        return
+      }
       case Push.SEND_CONFIRMED: {
         const r = new LeReader(f.subarray(1))
         const ack = r.u32()
@@ -616,6 +631,8 @@ export class MeshCoreClient implements RadioClient {
   async action(action: string, id: string) {
     const c = this.contacts.get(id)
     switch (action) {
+      case 'discover':
+        return this.discoverNearby(id)
       case 'advert-zero':
       case 'advert-flood':
         await this.expect(cmdAdvert(action === 'advert-flood'), Resp.OK)
@@ -771,6 +788,27 @@ export class MeshCoreClient implements RadioClient {
     const text = new TextDecoder().decode(body).replace(/\0+$/, '')
     this.sink.remote(id, { owner: { ts: Date.now(), text } })
     this.sink.actionResult(id, 'req-owner', true, 'Owner info received')
+  }
+
+  /** Asks nodes in direct range to identify themselves; repeaters answer after a random delay. */
+  private async discoverNearby(selfId: string) {
+    const tag = crypto.getRandomValues(new Uint32Array(1))[0]
+    this.discovering = { tag, found: new Map() }
+    await this.expect(cmdDiscover(tag), Resp.OK)
+    this.publishDiscovery()
+    await new Promise((r) => setTimeout(r, DISCOVER_LISTEN_MS))
+    const n = this.discovering.found.size
+    this.discovering = null
+    this.sink.actionResult(selfId, 'discover', true, `${n} node${n === 1 ? '' : 's'} in direct range`)
+  }
+
+  /** Shows replies as they arrive; repeaters answer at random times. */
+  private publishDiscovery() {
+    if (!this.discovering || !this.self) return
+    const list = [...this.discovering.found.entries()]
+      .map(([id, d]) => ({ id, heardSecsAgo: 0, snr: d.snr, snrThere: d.snrThere }))
+      .sort((a, b) => b.snr - a.snr)
+    this.sink.remote(idOf(this.self.publicKey), { neighbours: { ts: Date.now(), total: list.length, list } })
   }
 
   /**

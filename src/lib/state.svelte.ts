@@ -34,7 +34,7 @@ const SAMPLES_MAX = 1000
 const REQUEST_ACTIONS = new Set([
   'traceroute', 'req-position', 'req-telemetry', 'exchange-info',
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
-  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path',
+  'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path', 'discover',
 ])
 /** Likely reasons when a request times out. */
 const TIMEOUT_TEXT: Record<string, string> = {

@@ -70,14 +70,16 @@
 
 {#if r.neighbours}
   <div class="section">
-    <span>Neighbours {r.neighbours.total}</span><span class="faint">{ago(r.neighbours.ts, app.now)} ago</span>
+    <span>{node.id === app.selfId ? 'In direct range' : 'Neighbours'} {r.neighbours.total}</span><span class="faint">{ago(r.neighbours.ts, app.now)} ago</span>
   </div>
   <table class="nb">
     <tbody>
       {#each r.neighbours.list as n (n.id)}
         <tr>
           <td class="nm"><button class="link" onclick={() => app.nodeById.has(n.id) && app.showNode(n.id)}>{name(n.id)}</button></td>
-          <td class="mono">{n.snr} dB</td>
+          <td class="mono" title={n.snrThere !== undefined ? 'how we hear them ↓ / how they hear us ↑' : undefined}>
+            {n.snrThere !== undefined ? `↓${n.snr} ↑${n.snrThere}` : n.snr} dB
+          </td>
           <td class="faint">{n.heardSecsAgo > 0 ? ago(Date.now() - n.heardSecsAgo * 1000, Date.now()) : ''}</td>
         </tr>
       {/each}

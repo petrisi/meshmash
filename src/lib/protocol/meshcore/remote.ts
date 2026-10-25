@@ -55,6 +55,36 @@ export const cmdSendCli = (prefix: Uint8Array, text: string) =>
 export const cmdTracePath = (tag: number, hashes: Uint8Array) =>
   new LeWriter().u8(RemoteCmd.SEND_TRACE_PATH).u32(tag).u32(0).u8(0).bytes(hashes).finish()
 
+/**
+ * CMD_SEND_CONTROL_DATA with NODE_DISCOVER_REQ, sent zero-hop: [0x80][type mask][tag u32].
+ * Full keys in replies (prefix_only = 0); the mask asks every node type.
+ */
+export const cmdDiscover = (tag: number) => new LeWriter().u8(55).u8(0x80).u8(0xff).u32(tag).finish()
+
+export interface DiscoverReply {
+  tag: number
+  nodeType: number
+  publicKey: Uint8Array
+  /** How we heard the reply, dB. */
+  snr: number
+  rssi: number
+  /** How the replying node heard our request, dB. */
+  snrThere: number
+}
+
+/** PUSH_CONTROL_DATA carrying a NODE_DISCOVER response, or null for other control data. */
+export function decodeDiscoverReply(f: Uint8Array): DiscoverReply | null {
+  const r = new LeReader(f.subarray(1))
+  const snr = r.i8() / 4
+  const rssi = r.i8()
+  r.u8() // path_len
+  const kind = r.u8()
+  if ((kind & 0xf0) !== 0x90 || r.remaining < 4 + 1 + 8) return null
+  const snrThere = r.i8() / 4
+  const tag = r.u32()
+  return { tag, nodeType: kind & 0x0f, publicKey: r.rest().slice(), snr, rssi, snrThere }
+}
+
 // Pushes
 
 export const ROLE_NAMES = ['guest', 'read-only', 'read-write', 'admin'] as const

@@ -77,6 +77,7 @@ export function radioActions(protocol: Protocol): NodeAction[] {
     ? [
         { id: 'advert-zero', label: 'Advert (zero hop)' },
         { id: 'advert-flood', label: 'Advert (flood)' },
+        { id: 'discover', label: 'Discover nearby' },
       ]
     : [
         { id: 'send-nodeinfo', label: 'Send node info' },
