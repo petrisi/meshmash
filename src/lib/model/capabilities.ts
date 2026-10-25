@@ -2,7 +2,7 @@ import type { Capabilities, MeshNode, NodeKind, Protocol } from './types'
 
 export function capabilitiesFor(protocol: Protocol): Capabilities {
   return protocol === 'meshtastic'
-    ? { maxChannels: 8, maxNameLen: 39, maxShortNameLen: 4, messageMaxBytes: 200 }
+    ? { maxChannels: 8, maxNameLen: 39, maxShortNameLen: 4, messageMaxBytes: 200, hopLimit: 3 }
     : { maxChannels: 40, maxNameLen: 31, maxShortNameLen: 2, messageMaxBytes: 133 }
 }
 

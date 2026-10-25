@@ -1,10 +1,13 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { clock, dayLabel, initials, snrClass } from '../../format'
+  import { hopSuggestion } from '../../model/hops'
   import type { Message, ThreadKey } from '../../model/types'
   import { app } from '../../state.svelte'
+  import { loadHopLimit, saveHopLimit } from '../../store/hopLimits'
   import Badge from '../Badge.svelte'
   import Delivery from './Delivery.svelte'
+  import HopPicker from './HopPicker.svelte'
 
   let { thread }: { thread: ThreadKey } = $props()
 
@@ -35,6 +38,42 @@
     isMt || !isDm ? (app.session?.caps.messageMaxBytes ?? 200) : peer?.kind === 'room' ? 151 : 160,
   )
   const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+
+  // Meshtastic hop limit: the radio default unless overridden. A DM keeps its choice;
+  // on a channel it applies to the next message only.
+  const defHops = $derived(isMt ? app.session?.caps.hopLimit : undefined)
+  const radio = $derived(app.session?.info.nodeId)
+  let override = $state<number | null>(null)
+  $effect(() => {
+    override = isDm && radio ? loadHopLimit(radio, thread) : null
+  })
+  const hopLimit = $derived(override ?? defHops)
+  /** How far away the other side was heard: the replied message, else the DM peer. */
+  const far = $derived.by(() => {
+    if (replyTo && replyTo.from !== app.selfId) return { hops: replyTo.hops, who: nameOf(replyTo) }
+    if (!peer) return undefined
+    const heard = peer.hops ?? msgs.findLast((m) => m.from === peer.id && m.hops !== undefined)?.hops
+    return { hops: heard, who: peer.longName }
+  })
+  const suggest = $derived(hopLimit === undefined ? undefined : hopSuggestion(hopLimit, far?.hops))
+  function setHops(n: number) {
+    override = n === defHops ? null : n
+    if (isDm && radio) saveHopLimit(radio, thread, override)
+    input?.focus()
+  }
+  /** Hop limit to send with; a channel's one-off choice is used up. */
+  function useHops() {
+    const h = override ?? undefined
+    if (!isDm) override = null
+    return h
+  }
+  function keydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') replyTo = null
+    else if (defHops !== undefined && e.altKey && /^Digit[0-7]$/.test(e.code)) {
+      e.preventDefault()
+      setHops(Number(e.code.slice(5)))
+    }
+  }
   const byPacket = $derived(new Map(msgs.filter((m) => m.packetId !== undefined).map((m) => [m.packetId!, m])))
 
   /** Splits text into plain parts and @[name] mentions. */
@@ -93,7 +132,7 @@
     e.preventDefault()
     const text = draft.trim()
     if (!text || bytes > maxBytes) return
-    app.send(thread, prefix + text, isMt ? (replyTo ?? undefined) : undefined)
+    app.send(thread, prefix + text, isMt ? (replyTo ?? undefined) : undefined, useHops())
     draft = ''
     replyTo = null
   }
@@ -176,14 +215,18 @@
             {#if picking === m.id}
               {#each REACTIONS as e (e)}
                 <button class="ghost" onclick={() => {
-                  app.react(m, e)
+                  app.react(m, e, useHops())
                   picking = null
                 }}>{e}</button>
               {/each}
             {/if}
           </span>
         </span>
-        <span class="c mono muted">{hops(m)}</span>
+        {#if m.hopLimit !== undefined}
+          <span class="c mono muted" title="Sent with hop limit {m.hopLimit}">⤳{m.hopLimit}</span>
+        {:else}
+          <span class="c mono muted">{hops(m)}</span>
+        {/if}
         <span class="c mono {snrClass(m.snr)}">{m.snr ?? ''}</span>
         {#if isMt}<span class="c mono muted">{m.rssi ?? ''}</span>{/if}
         <span class="c mono">{#if mine}<Delivery {m} />{/if}</span>
@@ -202,12 +245,26 @@
   <form onsubmit={submit}>
     <input
       bind:this={input}
-      onkeydown={(e) => e.key === 'Escape' && (replyTo = null)}
+      onkeydown={keydown}
       bind:value={draft}
       placeholder={isDm ? `Message ${title}` : `Message ${title}`}
       autocomplete="off"
     />
     <span class="mono bytes" class:poor={bytes > maxBytes}>{bytes}/{maxBytes}</span>
+    {#if defHops !== undefined && hopLimit !== undefined}
+      <HopPicker
+        value={hopLimit}
+        def={defHops}
+        {suggest}
+        reason={far?.hops === undefined
+          ? undefined
+          : far.hops === 0
+            ? `${far.who} was heard directly`
+            : `${far.who} was heard ${far.hops} hop${far.hops === 1 ? '' : 's'} away`}
+        sticky={isDm}
+        onpick={setHops}
+      />
+    {/if}
     <button class="primary" disabled={!draft.trim() || bytes > maxBytes}>Send</button>
   </form>
 </section>

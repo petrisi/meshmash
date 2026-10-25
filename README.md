@@ -24,6 +24,7 @@ the radio directly over Web Serial, and everything it keeps stays in the browser
 - Traceroute with SNR per hop and history
 - Position, telemetry, user info and neighbour info requests
 - Replies and emoji reactions
+- Hop limit per message: kept per DM, one-off on channels; suggested when the other node was heard further away
 - PKI-encrypted direct messages marked 🔒, with readable PKI error messages
 - Position precision (`precision_bits`), also inferred for NodeDB positions that lack it
 - Favourite, ignore, remove from NodeDB

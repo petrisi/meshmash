@@ -115,6 +115,8 @@ export interface Message {
   reactions?: { emoji: string; from: string; ts: number }[]
   /** Meshtastic DM encrypted with the node's public key (PKI). */
   pki?: boolean
+  /** Outgoing, Meshtastic: hop limit chosen instead of the radio default. */
+  hopLimit?: number
 }
 
 export interface RadioParams {
@@ -145,6 +147,8 @@ export interface Capabilities {
   maxNameLen: number
   maxShortNameLen: number
   messageMaxBytes: number
+  /** Meshtastic: the radio's configured hop limit; set when messages can override it. */
+  hopLimit?: number
 }
 
 /** Data fetched from a node on request (MeshCore servers and telemetry). */

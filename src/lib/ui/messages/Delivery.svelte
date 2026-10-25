@@ -15,6 +15,8 @@
     if (m.status === 'failed') return 'failed'
     if (m.status === 'pending') return m.settled ? 'unknown' : 'queued'
     if (isDm && m.status === 'acked') return 'delivered'
+    // Hop limit 0: no relay and no ACK to wait for.
+    if (m.hopLimit === 0) return 'direct'
     if (repeats >= REPEAT_OK && (m.settled || !counts)) return 'ok'
     if (!m.settled) return repeats ? 'counting' : 'waiting'
     return repeats ? 'weak' : 'none'
@@ -30,6 +32,7 @@
     none: 'No rebroadcast heard',
     delivered: 'Delivered (recipient acknowledged)',
     failed: 'Not delivered',
+    direct: 'Sent to direct neighbours only (hop limit 0); no delivery receipt',
   }
 </script>
 
@@ -38,7 +41,7 @@
     <i class="spin"></i>
   {:else if state === 'delivered'}
     <b>✓✓</b>
-  {:else if state === 'ok' || state === 'weak'}
+  {:else if state === 'ok' || state === 'weak' || state === 'direct'}
     <b>✓</b>
   {:else if state === 'unknown'}
     <b>?</b>
@@ -78,6 +81,9 @@
   .ok,
   .delivered {
     color: var(--good);
+  }
+  .direct {
+    color: var(--muted);
   }
   .weak,
   .unknown {

@@ -512,24 +512,25 @@ class AppState {
   }
 
   /** Meshtastic: react to a message with an emoji. */
-  react(target: Message, emoji: string) {
+  react(target: Message, emoji: string, hopLimit?: number) {
     if (!this.#client || target.packetId === undefined) return
     const r: Message = { id: '', thread: target.thread, from: this.selfId, text: emoji, ts: Date.now(), status: 'sent', replyTo: target.packetId, reaction: true }
     this.#addReaction(r)
     const id = `local-${Date.now()}-${++localSeq}`
     this.#client
-      .sendText(target.thread, emoji, id, { replyTo: target.packetId, reaction: true })
+      .sendText(target.thread, emoji, id, { replyTo: target.packetId, reaction: true, hopLimit })
       .catch((e) => this.#log({ dir: 'error', kind: 'react', summary: String(e) }))
   }
 
-  send(thread: ThreadKey, text: string, replyTo?: Message) {
+  /** hopLimit: Meshtastic override of the radio's default for this message. */
+  send(thread: ThreadKey, text: string, replyTo?: Message, hopLimit?: number) {
     const id = `local-${Date.now()}-${++localSeq}`
-    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0, replyTo: replyTo?.packetId }
+    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0, replyTo: replyTo?.packetId, hopLimit }
     this.messages.push(msg)
     this.markRead(thread)
     if (this.#client) {
       void saveMessage(this.session!.info.nodeId, msg).catch(() => {})
-      this.#client.sendText(thread, text, id, { replyTo: replyTo?.packetId }).catch((e) => {
+      this.#client.sendText(thread, text, id, { replyTo: replyTo?.packetId, hopLimit }).catch((e) => {
         const m = this.messages.find((x) => x.id === id)
         if (m) Object.assign(m, { status: 'failed', settled: true })
         this.#log({ dir: 'error', kind: 'send', summary: String(e) })
@@ -547,13 +548,14 @@ class AppState {
     // Demo: radio accepts, then rebroadcasts trickle in during the window.
     later(500, (m) => (m.status = 'sent'))
     // Meshtastic reports only the first rebroadcast (implicit ACK), so at most 1.
-    const repeats = Math.floor(Math.random() * (this.protocol === 'meshtastic' ? 2 : 5))
+    // Zero hop: nobody relays, and no ACK is requested.
+    const repeats = hopLimit === 0 ? 0 : Math.floor(Math.random() * (this.protocol === 'meshtastic' ? 2 : 5))
     for (let i = 0; i < repeats; i++)
       later(1200 + Math.random() * (REPEAT_WINDOW_MS - 3000), (m) => (m.repeats = (m.repeats ?? 0) + 1))
-    if (isDm && Math.random() < 0.8) later(2500 + Math.random() * 8000, (m) => (m.status = 'acked'))
+    if (isDm && hopLimit !== 0 && Math.random() < 0.8) later(2500 + Math.random() * 8000, (m) => (m.status = 'acked'))
     later(REPEAT_WINDOW_MS, (m) => {
       m.settled = true
-      if (isDm && m.status !== 'acked') m.status = 'failed'
+      if (isDm && hopLimit !== 0 && m.status !== 'acked') m.status = 'failed'
     })
   }
 

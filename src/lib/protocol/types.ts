@@ -60,6 +60,8 @@ export interface SendOptions {
   replyTo?: number
   /** Send as a reaction to `replyTo` (Meshtastic). */
   reaction?: boolean
+  /** Meshtastic hop limit for this message instead of the radio default (0-7). */
+  hopLimit?: number
 }
 
 export interface RadioClient {

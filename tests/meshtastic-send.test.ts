@@ -43,4 +43,27 @@ describe('Meshtastic sendText', () => {
     await r.client.sendText('ch:0', '👍', 'b', { replyTo: 42, reaction: true })
     expect(r.packets[0].decoded).toMatchObject({ replyId: 42, emoji: 1 })
   })
+
+  it('uses the radio default hop limit unless one is given', async () => {
+    const { client, packets } = setup()
+    await client.sendText('dm:!d45c48d4', 'a', 'a')
+    expect(packets[0]).toMatchObject({ hopLimit: 3, wantAck: true })
+
+    const r = setup()
+    await r.client.sendText('ch:0', 'b', 'b', { hopLimit: 6 })
+    expect(r.packets[0]).toMatchObject({ hopLimit: 6, wantAck: true })
+  })
+
+  it('sends hop limit 0 without want_ack, which would make the firmware use its default', async () => {
+    const { client, packets } = setup()
+    await client.sendText('dm:!d45c48d4', 'a', 'a', { hopLimit: 0 })
+    expect(packets[0].hopLimit ?? 0).toBe(0)
+    expect(packets[0].wantAck ?? false).toBe(false)
+  })
+
+  it('clamps the hop limit to what the header holds', async () => {
+    const { client, packets } = setup()
+    await client.sendText('ch:0', 'a', 'a', { hopLimit: 9 })
+    expect(packets[0].hopLimit).toBe(7)
+  })
 })

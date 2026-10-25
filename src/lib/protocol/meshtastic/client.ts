@@ -290,7 +290,7 @@ export class MeshtasticClient implements RadioClient {
       voltage: self?.deviceMetrics?.voltage,
       position: this.toNode(self ?? { num: this.myNum }).position,
     }
-    this.sink.info(info, { maxChannels: 8 })
+    this.sink.info(info, { maxChannels: 8, hopLimit: this.lora.hopLimit || 3 })
     for (const n of this.nodes.values()) this.sink.node(this.toNode(n))
     this.sink.channels(this.channels())
     this.ready = true
@@ -512,7 +512,7 @@ export class MeshtasticClient implements RadioClient {
     to: number,
     portnum: number,
     payload: Uint8Array,
-    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number; id?: number } = {},
+    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number; hopLimit?: number; id?: number } = {},
   ): Promise<number> {
     const id = opts.id ?? this.packetId()
     const written = this.txChain.then(async () => {
@@ -549,7 +549,7 @@ export class MeshtasticClient implements RadioClient {
     to: number,
     portnum: number,
     payload: Uint8Array,
-    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number },
+    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number; hopLimit?: number },
   ) {
     await this.send(
       toRadioPacket({
@@ -560,7 +560,7 @@ export class MeshtasticClient implements RadioClient {
         wantResponse: opts.wantResponse,
         replyId: opts.replyId,
         emoji: opts.emoji,
-        hopLimit: this.lora.hopLimit || 3,
+        hopLimit: opts.hopLimit ?? (this.lora.hopLimit || 3),
         portnum,
         payload,
       }),
@@ -576,11 +576,15 @@ export class MeshtasticClient implements RadioClient {
     // can be replied to or reacted to right away.
     const id = this.packetId()
     this.sink.updateMessage(localId, { packetId: id })
+    // The firmware replaces hop limit 0 with its default when want_ack is set
+    // (Router::sendLocal), so a zero-hop message goes without an ACK request.
+    const hopLimit = opts.hopLimit === undefined ? undefined : Math.max(0, Math.min(7, opts.hopLimit))
     await this.sendPacket(to, Port.TEXT, utf8Encode(text), {
       channel,
-      wantAck: true,
+      wantAck: hopLimit !== 0,
       replyId: opts.replyTo,
       emoji: opts.reaction ? 1 : undefined,
+      hopLimit,
       id,
     })
     // Some boards read serial input only every ~20 s; stay 'pending' until the radio takes it.
