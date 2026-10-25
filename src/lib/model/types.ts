@@ -18,6 +18,8 @@ export interface Position {
   lat: number
   lon: number
   alt?: number
+  /** Meshtastic: coordinates kept to this many bits, centred in the cell (32 or unset = exact). */
+  precisionBits?: number
 }
 
 export interface ContactSettings {

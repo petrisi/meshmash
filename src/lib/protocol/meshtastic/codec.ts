@@ -46,6 +46,7 @@ export interface Position {
   lon?: number
   alt?: number
   time?: number
+  precisionBits?: number
 }
 
 export interface DeviceMetrics {
@@ -189,9 +190,27 @@ export function decodePosition(b: Uint8Array): Position {
       case 2: p.lon = asSfixed32(f.value) * 1e-7; break
       case 3: p.alt = asInt32(f.value) || undefined; break // 0 = unset
       case 4: p.time = asFixed32(f.value); break
+      case 23: p.precisionBits = asUint(f.value); break
     }
   }
   return p
+}
+
+/**
+ * Firmware truncates a shared position to `bits` and adds 2^(31-bits) (the cell centre), so
+ * both coordinates then have their lowest set bit at 31-bits. NodeDB entries sent to the app
+ * drop precision_bits (TypeConversions::ConvertToPosition), so it is recovered from that
+ * pattern. Exact coordinates match by chance with probability 4^-(31-bits); only patterns of
+ * 8+ low zero bits count, below that the cell is under 3 m anyway.
+ */
+export function inferPrecisionBits(lat: number, lon: number): number | undefined {
+  const low = (v: number) => {
+    const i = Math.round(v * 1e7) | 0
+    return i === 0 ? 32 : 31 - Math.clz32(i & -i)
+  }
+  const k = low(lat)
+  if (k < 8 || k > 30 || low(lon) !== k) return undefined
+  return 31 - k
 }
 
 export function decodeDeviceMetrics(b: Uint8Array): DeviceMetrics {

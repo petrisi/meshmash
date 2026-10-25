@@ -10,6 +10,12 @@
   import TelemetryHistory from './TelemetryHistory.svelte'
   import ContactSettingsPanel from './ContactSettingsPanel.svelte'
   import { contactLink } from '../../protocol/meshcore/links'
+  import { precisionRadiusM } from '../../map/geo'
+
+  const precision = (bits: number | undefined) => {
+    const r = precisionRadiusM(bits)
+    return r >= 1000 ? `${(r / 1000).toFixed(1)} km` : `${Math.round(r)} m`
+  }
 
   let { node, compact = false }: { node: MeshNode; compact?: boolean } = $props()
 
@@ -135,7 +141,10 @@
 
   {#if !compact}<TelemetryHistory nodeId={node.id} />{/if}
 
-  <div class="section"><span>Position</span></div>
+  <div class="section">
+    <span>Position</span>
+    {#if node.position && app.view !== 'map'}<button class="ghost link" onclick={() => app.showOnMap(node.id)}>show on map</button>{/if}
+  </div>
   <dl class="kv">
     {#if node.position}
       {#if !isSelf}
@@ -144,11 +153,14 @@
       {/if}
       <dt>Lat / Lon</dt><dd class="mono">{node.position.lat.toFixed(5)}, {node.position.lon.toFixed(5)}</dd>
       {#if node.position.alt !== undefined}<dt>Altitude</dt><dd>{node.position.alt} m</dd>{/if}
+      {#if precisionRadiusM(node.position.precisionBits)}
+        <dt>Precision</dt><dd>within {precision(node.position.precisionBits)} (shared coarsely)</dd>
+      {/if}
     {:else}
       <dt>—</dt><dd class="faint">No position</dd>
     {/if}
   </dl>
-  {#if mapPoints.length}<MiniMap points={mapPoints} />{/if}
+  {#if mapPoints.length && app.view !== 'map'}<MiniMap points={mapPoints} />{/if}
 </div>
 
 <style>

@@ -11,6 +11,7 @@ import {
   decodeFromRadio,
   decodeNodeInfo,
   decodePosition,
+  inferPrecisionBits,
   decodeNeighborInfo,
   decodeRouteDiscovery,
   decodeRouting,
@@ -331,7 +332,10 @@ export class MeshtasticClient implements RadioClient {
       channelUtil: n.deviceMetrics?.channelUtil !== undefined ? round1(n.deviceMetrics.channelUtil) : undefined,
       airUtilTx: n.deviceMetrics?.airUtilTx !== undefined ? round1(n.deviceMetrics.airUtilTx) : undefined,
       uptimeS: n.deviceMetrics?.uptime,
-      position: pos?.lat && pos?.lon ? { lat: pos.lat, lon: pos.lon, alt: pos.alt } : undefined,
+      position:
+        pos?.lat && pos?.lon
+          ? { lat: pos.lat, lon: pos.lon, alt: pos.alt, precisionBits: pos.precisionBits ?? inferPrecisionBits(pos.lat, pos.lon) }
+          : undefined,
       favorite: n.isFavorite,
       ignored: n.isIgnored,
       viaMqtt: n.viaMqtt,
@@ -402,7 +406,7 @@ export class MeshtasticClient implements RadioClient {
         const pos = decodePosition(d.payload)
         if (pos.lat && pos.lon) {
           this.mergeNode(p.from, { position: pos })
-          this.sink.node({ id: fromId, position: { lat: pos.lat, lon: pos.lon, alt: pos.alt } })
+          this.sink.node({ id: fromId, position: { lat: pos.lat, lon: pos.lon, alt: pos.alt, precisionBits: pos.precisionBits } })
         }
         return
       }

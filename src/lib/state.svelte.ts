@@ -25,7 +25,7 @@ import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRa
 import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
 
-export type View = 'messages' | 'nodes' | 'log'
+export type View = 'messages' | 'nodes' | 'map' | 'log'
 
 const LOG_MAX = 5000
 let localSeq = 0
@@ -85,6 +85,8 @@ class AppState {
   view = $state<View>('messages')
   activeThread = $state<ThreadKey | null>(null)
   selectedNode = $state<string | null>(null)
+  /** Set by showOnMap; the map centres on this node when n changes. */
+  mapFocus = $state<{ id: string; n: number } | null>(null)
   log = $state<LogEntry[]>([])
   /** Set while a radio connection is being established. */
   connecting = $state<string | null>(null)
@@ -485,6 +487,12 @@ class AppState {
   showNode(nodeId: string) {
     this.selectedNode = nodeId
     this.view = 'nodes'
+  }
+
+  showOnMap(nodeId: string) {
+    this.selectedNode = nodeId
+    this.mapFocus = { id: nodeId, n: (this.mapFocus?.n ?? 0) + 1 }
+    this.view = 'map'
   }
 
   /** Reactions attach to the message they answer; unknown targets are dropped. */

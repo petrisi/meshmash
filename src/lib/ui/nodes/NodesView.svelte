@@ -1,7 +1,8 @@
 <script lang="ts">
   import { ago, battery, distanceKm, km, snrClass } from '../../format'
   import { KIND_LABEL } from '../../model/capabilities'
-  import type { MeshNode, NodeKind } from '../../model/types'
+  import { matchesQuery, nodeFilters } from '../../model/filters'
+  import type { MeshNode } from '../../model/types'
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
   import NodeDetail from './NodeDetail.svelte'
@@ -31,24 +32,7 @@
   const proto = $derived(app.protocol!)
   const selfNode = $derived(app.nodeById.get(app.selfId))
 
-  const filters = $derived<{ id: string; label: string; test: (n: MeshNode) => boolean }[]>(
-    proto === 'meshcore'
-      ? [
-          { id: 'all', label: 'All', test: () => true },
-          ...(['chat', 'repeater', 'room', 'sensor'] as NodeKind[]).map((k) => ({
-            id: k,
-            label: KIND_LABEL[k] + 's',
-            test: (n: MeshNode) => n.kind === k,
-          })),
-        ]
-      : [
-          { id: 'all', label: 'All', test: () => true },
-          { id: 'fav', label: 'Favorites', test: (n) => !!n.favorite },
-          { id: 'direct', label: 'Direct', test: (n) => n.hops === 0 },
-          { id: '2h', label: 'Heard 2h', test: (n) => !!n.lastHeard && Date.now() - n.lastHeard < 7_200_000 },
-          { id: 'infra', label: 'Routers', test: (n) => n.kind === 'router' },
-        ],
-  )
+  const filters = $derived(nodeFilters(proto))
 
   const cols = $derived<Col[]>([
     { key: 'name', label: 'Name' },
@@ -80,13 +64,7 @@
 
   const rows = $derived.by(() => {
     const f = filters.find((x) => x.id === filter) ?? filters[0]
-    const q = query.trim().toLowerCase()
-    const list = app.nodes.filter(
-      (n) =>
-        n.id !== app.selfId &&
-        f.test(n) &&
-        (!q || n.longName.toLowerCase().includes(q) || n.shortName.toLowerCase().includes(q) || n.id.includes(q)),
-    )
+    const list = app.nodes.filter((n) => n.id !== app.selfId && f.test(n) && matchesQuery(n, query))
     const dir = sortAsc ? 1 : -1
     list.sort((a, b) => {
       const va = val(a, sortKey)
