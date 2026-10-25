@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import { ago, distanceKm, km, snrClass } from '../../format'
+  import { ago, distanceErrKm, distanceKm, km, snrClass } from '../../format'
   import { fit, type LatLon, placeLabels, type Point, precisionRadiusM, pxPerMetre, spread, validPosition } from '../../map/geo'
   import { KIND_LABEL } from '../../model/capabilities'
   import { matchesQuery, nodeFilters } from '../../model/filters'
@@ -235,8 +235,9 @@
         {#snippet overlay(vp: Viewport)}
           {@const L = layout(vp)}
           <svg class="overlay" width={vp.width} height={vp.height}>
+            <!-- Only the selected node's: dozens of overlapping circles would bury the map. -->
             {#each L.marks as m (m.n.id)}
-              {#if m.r > 4}<circle class="prec" cx={m.base.x} cy={m.base.y} r={m.r} />{/if}
+              {#if m.r > 4 && m.n.id === app.selectedNode}<circle class="prec" cx={m.base.x} cy={m.base.y} r={m.r} />{/if}
             {/each}
             {#each L.links as l, i (i)}
               <polyline class="link {l.cls}" points={l.points.map((p) => `${p.x},${p.y}`).join(' ')}><title>{l.title}</title></polyline>
@@ -279,7 +280,7 @@
                 <span>
                   heard {ago(hovered.lastHeard, app.now)}{hovered.hops !== undefined ? ` · ${hovered.hops === 0 ? 'direct' : `${hovered.hops} hop${hovered.hops === 1 ? '' : 's'}`}` : ''}{hovered.snr !== undefined ? ` · ${hovered.snr} dB` : ''}
                 </span>
-                {#if self?.position}<span>{km(distanceKm(self.position, hovered.position))} km {precisionText(hovered)}</span>{/if}
+                {#if self?.position}<span>{km(distanceKm(self.position, hovered.position), distanceErrKm(self.position, hovered.position))} km {precisionText(hovered)}</span>{/if}
               {:else if precisionText(hovered)}<span>{precisionText(hovered)}</span>{/if}
             </div>
           {/if}
@@ -378,9 +379,10 @@
     overflow: visible;
   }
   .prec {
-    fill: color-mix(in srgb, var(--accent) 7%, transparent);
-    stroke: color-mix(in srgb, var(--accent) 35%, transparent);
-    stroke-dasharray: 3 3;
+    fill: color-mix(in srgb, var(--accent) 14%, transparent);
+    stroke: color-mix(in srgb, var(--accent) 75%, transparent);
+    stroke-width: 1.5;
+    stroke-dasharray: 5 4;
   }
   .link {
     fill: none;

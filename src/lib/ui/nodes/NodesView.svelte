@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago, battery, distanceKm, km, snrClass } from '../../format'
+  import { ago, battery, distanceErrKm, distanceKm, km, snrClass } from '../../format'
   import { KIND_LABEL } from '../../model/capabilities'
   import { matchesQuery, nodeFilters } from '../../model/filters'
   import type { MeshNode } from '../../model/types'
@@ -180,7 +180,7 @@
               <td class="num {snrClass(n.snr)}">{n.snr ?? ''}</td>
               <td class="num">{n.rssi ?? ''}</td>
               <td class="num" class:poor={n.batteryPct !== undefined && n.batteryPct < 20}>{battery(n.batteryPct)}</td>
-              <td class="num">{isSelf ? '' : km(dist(n))}</td>
+              <td class="num">{isSelf ? '' : km(dist(n), distanceErrKm(selfNode?.position, n.position))}</td>
             </tr>
           {/each}
         </tbody>

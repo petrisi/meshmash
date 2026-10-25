@@ -166,7 +166,10 @@
             </span>
           {/if}
           <span class="acts">
-            <button class="ghost" title="Reply" onclick={() => startReply(m)}>↩</button>
+            <!-- Meshtastic replies refer to the packet id; older history may not have one. -->
+            {#if !isMt || m.packetId !== undefined}
+              <button class="ghost" title="Reply" onclick={() => startReply(m)}>↩</button>
+            {/if}
             {#if isMt && m.packetId !== undefined}
               <button class="ghost" title="React" onclick={() => (picking = picking === m.id ? null : m.id)}>☺</button>
             {/if}

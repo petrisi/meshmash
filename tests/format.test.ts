@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, battery, clock, dayLabel, distanceKm, graphemes, hue, initials, km, snrClass, uptime } from '../src/lib/format'
+import { ago, battery, clock, dayLabel, distanceErrKm, distanceKm, graphemes, hue, initials, km, snrClass, uptime } from '../src/lib/format'
 
 describe('format', () => {
   it('ago', () => {
@@ -33,6 +33,18 @@ describe('format', () => {
     expect(km(3.14159)).toBe('3.1')
     expect(km(10.4)).toBe('10')
     expect(km(123.6)).toBe('124')
+  })
+
+  it('marks distances from coarse positions with a tilde', () => {
+    // Below display resolution: unchanged.
+    expect(km(7.63, 0.023)).toBe('7.6')
+    expect(km(12.4, 0.3)).toBe('12')
+    // Beyond it: tilde, whole km once the error reaches 0.5 km.
+    expect(km(7.63, 0.2)).toBe('~7.6')
+    expect(km(7.63, 2.9)).toBe('~8')
+    expect(km(11.2, 2.9)).toBe('~11')
+    expect(distanceErrKm({ lat: 61, lon: 23 }, { lat: 61, lon: 23, precisionBits: 13 })).toBeCloseTo(2.918, 2)
+    expect(distanceErrKm({ lat: 61, lon: 23 }, undefined)).toBe(0)
   })
 
   it('graphemes and initials', () => {

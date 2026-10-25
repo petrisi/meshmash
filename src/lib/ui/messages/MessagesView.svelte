@@ -1,6 +1,6 @@
 <script lang="ts">
   import { flip } from 'svelte/animate'
-  import { ago, distanceKm, km } from '../../format'
+  import { ago, distanceErrKm, distanceKm, km } from '../../format'
   import { app } from '../../state.svelte'
   import NodeDetail from '../nodes/NodeDetail.svelte'
   import Conversation from './Conversation.svelte'
@@ -35,7 +35,7 @@
     const heard = app.channelHeard[thread] ?? {}
     const list = Object.entries(heard).flatMap(([id, ts]) => {
       const node = app.nodeById.get(id)
-      return node && !node.ignored ? [{ node, ts, dist: distanceKm(selfPos, node.position) }] : []
+      return node && !node.ignored ? [{ node, ts, dist: distanceKm(selfPos, node.position), err: distanceErrKm(selfPos, node.position) }] : []
     })
     return heardSort === 'alpha'
       ? list.sort((a, b) => a.node.longName.localeCompare(b.node.longName, undefined, { sensitivity: 'base' }))
@@ -84,7 +84,7 @@
               >
                 <span class="mono sn">{p.node.shortName}</span>
                 <span class="pn">{p.node.longName}</span>
-                <span class="mono km" title="distance km">{p.dist !== undefined ? km(p.dist) : ''}</span>
+                <span class="mono km" title="distance km">{p.dist !== undefined ? km(p.dist, p.err) : ''}</span>
                 <span class="mono ago" title="last heard">{ago(p.ts, app.now)}</span>
               </button>
             {/key}

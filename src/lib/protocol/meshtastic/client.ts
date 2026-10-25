@@ -512,9 +512,9 @@ export class MeshtasticClient implements RadioClient {
     to: number,
     portnum: number,
     payload: Uint8Array,
-    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number } = {},
+    opts: { channel?: number; wantAck?: boolean; wantResponse?: boolean; replyId?: number; emoji?: number; id?: number } = {},
   ): Promise<number> {
-    const id = this.packetId()
+    const id = opts.id ?? this.packetId()
     const written = this.txChain.then(async () => {
       const wait = (this.lastAccepted.get(portnum) ?? 0) + (RATE_LIMIT_MS[portnum] ?? 0) + 1000 - Date.now()
       if (RATE_LIMIT_MS[portnum] && wait > 0) {
@@ -572,13 +572,17 @@ export class MeshtasticClient implements RadioClient {
     const isDm = thread.startsWith('dm:')
     const to = isDm ? nodeNum(thread.slice(3)) : BROADCAST
     const channel = isDm ? 0 : Number(thread.slice(3))
-    const id = await this.sendPacket(to, Port.TEXT, utf8Encode(text), {
+    // Known before the radio takes the packet (up to ~25 s on some boards), so the message
+    // can be replied to or reacted to right away.
+    const id = this.packetId()
+    this.sink.updateMessage(localId, { packetId: id })
+    await this.sendPacket(to, Port.TEXT, utf8Encode(text), {
       channel,
       wantAck: true,
       replyId: opts.replyTo,
       emoji: opts.reaction ? 1 : undefined,
+      id,
     })
-    this.sink.updateMessage(localId, { packetId: id })
     // Some boards read serial input only every ~20 s; stay 'pending' until the radio takes it.
     this.pending.set(id, { localId, to, accepted: false, timer: setTimeout(() => this.accept(id), ACCEPT_TIMEOUT_MS) })
   }

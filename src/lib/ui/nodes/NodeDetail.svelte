@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago, battery, distanceKm, km, snrClass, uptime } from '../../format'
+  import { ago, battery, distanceErrKm, distanceKm, km, snrClass, uptime } from '../../format'
   import { KIND_LABEL, nodeActions } from '../../model/capabilities'
   import type { MeshNode } from '../../model/types'
   import { app } from '../../state.svelte'
@@ -24,6 +24,7 @@
   const actions = $derived(nodeActions(proto, node, isSelf))
   const self = $derived(app.nodeById.get(app.selfId))
   const dist = $derived(isSelf ? undefined : distanceKm(self?.position, node.position))
+  const distErr = $derived(distanceErrKm(self?.position, node.position))
   const busy = $derived(app.busy[node.id])
   const results = $derived(
     Object.values(app.results[node.id] ?? {})
@@ -149,7 +150,7 @@
     {#if node.position}
       {#if !isSelf}
         <dt>Distance</dt>
-        <dd>{dist !== undefined ? `${km(dist)} km` : 'unknown (own position not set)'}</dd>
+        <dd>{dist !== undefined ? `${km(dist, distErr)} km${km(dist, distErr).startsWith('~') ? ` (±${km(distErr)} km)` : ''}` : 'unknown (own position not set)'}</dd>
       {/if}
       <dt>Lat / Lon</dt><dd class="mono">{node.position.lat.toFixed(5)}, {node.position.lon.toFixed(5)}</dd>
       {#if node.position.alt !== undefined}<dt>Altitude</dt><dd>{node.position.alt} m</dd>{/if}

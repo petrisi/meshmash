@@ -1,3 +1,4 @@
+import { precisionRadiusM } from './map/geo'
 import type { Position } from './model/types'
 
 export function ago(ts: number | undefined, now = Date.now()): string {
@@ -41,9 +42,21 @@ export function distanceKm(a?: Position, b?: Position): number | undefined {
   return 2 * R * Math.asin(Math.sqrt(h))
 }
 
-export function km(d: number | undefined): string {
+/**
+ * Distance in km as shown: one decimal below 10 km. With `errKm` (the positions' combined
+ * uncertainty) beyond that resolution it gets a tilde, and whole km once the error is
+ * 0.5 km or more.
+ */
+export function km(d: number | undefined, errKm = 0): string {
   if (d === undefined) return '—'
-  return d < 10 ? d.toFixed(1) : Math.round(d).toString()
+  const step = d < 10 ? 0.1 : 1
+  if (errKm <= step / 2) return d < 10 ? d.toFixed(1) : Math.round(d).toString()
+  return `~${errKm >= 0.5 ? Math.round(d) : d.toFixed(1)}`
+}
+
+/** Combined uncertainty of a distance between two positions, km. */
+export function distanceErrKm(a?: Position, b?: Position): number {
+  return (precisionRadiusM(a?.precisionBits) + precisionRadiusM(b?.precisionBits)) / 1000
 }
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })

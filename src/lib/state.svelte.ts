@@ -384,6 +384,11 @@ class AppState {
         }
         // Outcome of sends interrupted by a disconnect is unknown; stop their spinners.
         for (const m of history) if (m.from === this.selfId && !m.settled) m.settled = true
+        // History from before packet ids were stored: received Meshtastic messages carry it in their id.
+        for (const m of history) {
+          const id = m.packetId === undefined ? /^mt-![0-9a-f]{8}-(\d+)$/.exec(m.id)?.[1] : undefined
+          if (id) m.packetId = Number(id)
+        }
         const ids = new Set(this.messages.map((m) => m.id))
         this.messages = [...history.filter((m) => !ids.has(m.id)), ...this.messages].sort((a, b) => a.ts - b.ts)
         const dms = this.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3))
