@@ -352,12 +352,12 @@ export class MeshtasticClient implements RadioClient {
   private onPacket(p: MeshPacket) {
     const now = Date.now()
     const fromId = nodeId(p.from)
-    // After config, firmware replays stored packets (latest position/telemetry per node)
-    // with their original rx_time but without hop_limit or RSSI. Those are history, not
-    // "heard now", and their hop count is unknown.
+    // Packets the radio queued while no client was connected arrive with their original
+    // rx_time. They are real receptions, but older than what the node list already holds.
     const rxAt = p.rxTime ? Math.min(p.rxTime * 1000, now) : now
-    const replayed = now - rxAt > 120_000
-    const hops = p.hopStart && !replayed ? p.hopStart - (p.hopLimit ?? 0) : undefined
+    // Firmware getHopsAway(): unknown without hop_start or when hop_limit exceeds it.
+    const hopLimit = p.hopLimit ?? 0
+    const hops = p.hopStart && p.hopStart >= hopLimit ? p.hopStart - hopLimit : undefined
 
     if (p.from !== this.myNum) {
       const known = this.nodes.get(p.from)
@@ -365,8 +365,8 @@ export class MeshtasticClient implements RadioClient {
       this.sink.heard(fromId, rxAt, p.channel)
       const patch: Partial<MeshNode> & { id: string } = { id: fromId }
       if (newer) patch.lastHeard = rxAt
-      if (hops !== undefined) patch.hops = hops
-      if (hops === 0 && p.rxSnr) {
+      if (newer && hops !== undefined) patch.hops = hops
+      if (newer && hops === 0 && p.rxSnr) {
         patch.snr = p.rxSnr
         patch.rssi = p.rxRssi
       }
