@@ -108,6 +108,8 @@ export interface Message {
   hops?: number
   /** Meshtastic only: sender's initial hop limit. */
   hopStart?: number
+  /** Meshtastic only: last byte of the node whose transmission our radio heard. */
+  relay?: number
   snr?: number
   rssi?: number
   /** Outgoing: rebroadcasts of this packet heard by our radio. */

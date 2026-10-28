@@ -405,6 +405,7 @@ export class MeshtasticClient implements RadioClient {
           status: 'received',
           hops,
           hopStart: p.hopStart || undefined,
+          relay: p.relayNode || undefined,
           snr: p.rxSnr || undefined,
           rssi: p.rxRssi || undefined,
           packetId: p.id,

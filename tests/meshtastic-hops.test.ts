@@ -22,7 +22,7 @@ function setup() {
     const p = new PbWriter().fixed32(1, FROM).fixed32(2, BROADCAST).message(4, data).fixed32(6, id)
       .fixed32(7, Math.floor(Date.now() / 1000) - ago).fixed32(8, f32(5.5))
     if (hopLimit) p.uint(9, hopLimit)
-    p.uint(15, hopStart)
+    p.uint(15, hopStart).uint(19, 0xb0)
     t.onData(encodeFrame(new PbWriter().message(2, p).finish()))
   }
   return { rec, messages, receive }
@@ -32,7 +32,7 @@ describe('message hops', () => {
   it('a packet queued while no client was connected keeps its hops', () => {
     const { messages, receive } = setup()
     receive(1, 600, 3, 2)
-    expect(messages[0]).toMatchObject({ hops: 1, hopStart: 3 })
+    expect(messages[0]).toMatchObject({ hops: 1, hopStart: 3, relay: 0xb0 })
   })
 
   it('hop_limit 0 is left out of the packet: all hops used', () => {

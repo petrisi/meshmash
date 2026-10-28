@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte'
   import { clock, dayLabel, initials, snrClass } from '../../format'
   import { hopSuggestion } from '../../model/hops'
+  import { guessRelay, relayByte, relayNames } from '../../model/relay'
   import type { Message, ThreadKey } from '../../model/types'
   import { app } from '../../state.svelte'
   import { loadHopLimit, saveHopLimit } from '../../store/hopLimits'
@@ -102,6 +103,39 @@
   function hops(m: Message) {
     if (m.hops === undefined) return ''
     return m.hopStart !== undefined ? `${m.hops}/${m.hopStart}` : `${m.hops}`
+  }
+
+  // Meshtastic relay byte → candidate nodes, grouped once per node list change.
+  const byRelayByte = $derived.by(() => {
+    const g = new Map<number, typeof app.nodes>()
+    for (const n of app.nodes) {
+      const b = relayByte(n.id)
+      if (b !== undefined) g.set(b, [...(g.get(b) ?? []), n])
+    }
+    return g
+  })
+  /** Who our radio heard the message from: the sender itself, or "[likely ]zeb3 or koik". */
+  function relayOf(m: Message): { direct: true } | { direct: false; text: string; likely: boolean } | undefined {
+    if (m.relay === undefined || m.from === app.selfId) return undefined
+    if (m.relay === relayByte(m.from) && (m.hops ?? 0) === 0) return { direct: true }
+    const g = guessRelay(m.relay, byRelayByte.get(m.relay) ?? [], app.nodeById.get(app.selfId), m.from)
+    return { direct: false, text: relayNames(g), likely: g.likely }
+  }
+  function hopsTitle(m: Message) {
+    const r = relayOf(m)
+    const used =
+      m.hopStart === undefined
+        ? `${m.hops} hop${m.hops === 1 ? '' : 's'}`
+        : m.hops === 0 && r?.direct !== false
+          ? `Heard directly · sender's hop limit ${m.hopStart}`
+          : `${m.hops} of ${m.hopStart} hops used`
+    return r && !r.direct ? `${used} · ${r.likely ? 'likely ' : ''}via ${r.text}` : used
+  }
+  function signalTitle(m: Message) {
+    const r = relayOf(m)
+    if (!r) return undefined
+    if (r.direct) return `Signal from ${app.nodeById.get(m.from)?.shortName ?? m.from}`
+    return `Signal ${r.likely ? 'likely ' : ''}from ${r.text}`
   }
 
   // Captured when the thread opens: the divider stays put while reading.
@@ -228,10 +262,10 @@
         {#if m.hopLimit !== undefined}
           <span class="c mono muted" title="Sent with hop limit {m.hopLimit}">⤳{m.hopLimit}</span>
         {:else}
-          <span class="c mono muted">{hops(m)}</span>
+          <span class="c mono muted" class:relayed={relayOf(m)?.direct === false} title={m.hops === undefined ? undefined : hopsTitle(m)}>{hops(m)}</span>
         {/if}
-        <span class="c mono {snrClass(m.snr)}">{m.snr ?? ''}</span>
-        {#if isMt}<span class="c mono muted">{m.rssi ?? ''}</span>{/if}
+        <span class="c mono {snrClass(m.snr)}" title={m.snr === undefined ? undefined : signalTitle(m)}>{m.snr ?? ''}</span>
+        {#if isMt}<span class="c mono muted" title={m.rssi === undefined ? undefined : signalTitle(m)}>{m.rssi ?? ''}</span>{/if}
         <span class="c mono">{#if mine}<Delivery {m} />{/if}</span>
       </div>
     {/each}
@@ -378,6 +412,10 @@
     font-size: 11px;
     text-align: right;
     white-space: nowrap;
+  }
+  .relayed {
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
   }
   .msg:not(.cont) {
     margin-top: 4px;
