@@ -24,6 +24,13 @@ describe('channel keys', () => {
     expect(parseKey('not a key', [16])).toBeUndefined()
   })
 
+  it('Meshtastic one-byte keys', () => {
+    expect(parseKey('WQ==', [1, 16, 32])).toEqual(Uint8Array.of(0x59))
+    expect(parseKey('AA==', [1, 16, 32])).toEqual(Uint8Array.of(0))
+    expect(parseKey('WQ==', [16])).toBeUndefined()
+    expect(parseKey(toBase64(K16.subarray(0, 5)), [1, 16, 32])).toBeUndefined()
+  })
+
   it('a different channel: Meshtastic name or key, MeshCore key only', () => {
     const old = { index: 1, name: 'a', key: K16 }
     expect(channelReplaced('meshtastic', old, { ...old, name: 'b' })).toBe(true)

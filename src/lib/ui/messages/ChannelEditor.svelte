@@ -48,7 +48,7 @@
       case 'empty':
         return new Uint8Array()
       case 'paste':
-        return parseKey(pasted, isMt ? [16, 32] : [16])
+        return parseKey(pasted, isMt ? [1, 16, 32] : [16])
     }
   })
 
@@ -58,7 +58,7 @@
     if (!trimmed && !primary) return 'Name required'
     return ''
   })
-  const keyError = $derived(!hashtag && keyMode === 'paste' && pasted.trim() && !key ? (isMt ? '16 or 32 bytes, base64 or hex' : '16 bytes, hex or base64') : '')
+  const keyError = $derived(!hashtag && keyMode === 'paste' && pasted.trim() && !key ? (isMt ? '1, 16 or 32 bytes, base64 or hex' : '16 bytes, hex or base64') : '')
   const valid = $derived(!nameError && !!key)
   const next = $derived(key ? { index: slot, name: trimmed, key } : undefined)
   const doomed = $derived(next && app.replacesChannel(next, start.isNew) ? (app.byThread.get(`ch:${slot}`)?.length ?? 0) : 0)
