@@ -149,6 +149,13 @@ export function decodePath(pathLen: number, bytes: Uint8Array): string[] | undef
   return hops
 }
 
+/** Hex hop hashes back to a path_len byte and path bytes. */
+export function encodePath(hops: string[]): { outLen: number; outBytes: Uint8Array } {
+  const size = hops.length ? hops[0].length / 2 : 1
+  const outBytes = Uint8Array.from(hops.join('').match(/../g) ?? [], (b) => parseInt(b, 16))
+  return { outLen: ((size - 1) << 6) | hops.length, outBytes }
+}
+
 export const pathHops = (pathLen: number) => (pathLen === OUT_PATH_FLOOD ? undefined : pathLen & 63)
 
 // Responses

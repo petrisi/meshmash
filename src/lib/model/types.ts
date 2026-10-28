@@ -175,6 +175,7 @@ export interface Sample {
 /** What we keep per node across sessions. */
 export interface NodeData {
   traces?: TracerouteResult[]
+  route?: FoundRoute
   remote?: RemoteData
   samples?: Sample[]
 }
@@ -200,4 +201,22 @@ export interface TracerouteResult {
   rttMs?: number
   /** MeshCore path discovery: the route found can be saved to the contact. */
   discovered?: boolean
+  /** MeshCore path discovery: the hop hashes found. */
+  found?: Omit<FoundRoute, 'ts'>
+  /** MeshCore trace: the route it followed. */
+  traced?: {
+    /** found: by path discovery; stored: the contact's path, back assumed reversed; direct: no path. */
+    via: 'found' | 'stored' | 'direct'
+    foundTs?: number
+    /** Hash bytes per hop. */
+    hashBytes: number
+  }
+}
+
+/** MeshCore route from path discovery: hop hashes as hex, in travel order. */
+export interface FoundRoute {
+  ts: number
+  out: string[]
+  /** Route the answer took back to us. */
+  back?: string[]
 }

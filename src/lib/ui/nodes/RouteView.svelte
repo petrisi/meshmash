@@ -28,6 +28,15 @@
     return all.length ? Math.min(...all) : undefined
   }
   const secs = (ms?: number) => (ms === undefined ? '—' : `${(ms / 1000).toFixed(1)} s`)
+  const tracedText = (t: NonNullable<TracerouteResult['traced']>) =>
+    [
+      t.via === 'found'
+        ? `Along the path found ${t.foundTs ? `${ago(t.foundTs, app.now)} ago` : 'earlier'}`
+        : t.via === 'stored'
+          ? 'Along the stored path; back assumed to be its reverse'
+          : 'No path known; tried as a direct neighbour',
+      `${t.hashBytes}-byte hop IDs`,
+    ].join(' · ')
 </script>
 
 {#if tr}
@@ -52,6 +61,7 @@
       </ol>
     {/each}
     {#if !tr.back}<div class="faint small">No return route reported.</div>{/if}
+    {#if tr.traced}<div class="faint small">{tracedText(tr.traced)}</div>{/if}
     {#if tr.discovered && picked === 0}
       <div class="use">
         <span class="faint small">Found by path discovery; the radio keeps its old path until saved.</span>

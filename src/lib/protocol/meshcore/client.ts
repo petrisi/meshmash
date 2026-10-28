@@ -1,9 +1,9 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
-import type { Channel, ContactSettings, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
+import type { Channel, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { Transport } from '../../transport/types'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
-import type { RadioClient, RadioSink } from '../types'
+import type { ActionContext, RadioClient, RadioSink } from '../types'
 import { type ClockFix, clockFixes, correctRadioSecs, recordClockFix } from './clockFix'
 import { parseContactLink } from './links'
 import {
@@ -22,6 +22,7 @@ import {
   decodeNeighbours,
   decodeStatus,
   decodeTraceData,
+  traceHashes,
   NEIGHBOURS_PER_PAGE,
   neighboursReq,
   pushPrefix,
@@ -56,6 +57,7 @@ import {
   decodeContactMsg,
   decodeDeviceInfo,
   decodePath,
+  encodePath,
   decodePathDiscovery,
   decodeRxLog,
   decodeSelfInfo,
@@ -136,10 +138,8 @@ export class MeshCoreClient implements RadioClient {
   private syncing = false
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
-  /** Routes found by path discovery, kept for "Use this path". */
   private unsaved = new Map<string, Contact>()
   private discovering: { tag: number; found: Map<string, DiscoverReply> } | null = null
-  private discovered = new Map<string, { outLen: number; outBytes: Uint8Array }>()
   private secrets = new Map<number, Uint8Array>()
   /**
    * The radio matches only one outstanding remote request (login, status, telemetry, binary,
@@ -656,7 +656,7 @@ export class MeshCoreClient implements RadioClient {
     this.acks.set(sent.tag, { localId, timer })
   }
 
-  async action(action: string, id: string) {
+  async action(action: string, id: string, ctx?: ActionContext) {
     const c = this.contacts.get(id)
     switch (action) {
       case 'discover':
@@ -685,12 +685,12 @@ export class MeshCoreClient implements RadioClient {
       case 'path-discovery':
         return this.discoverPath(id, c)
       case 'use-path': {
-        const d = this.discovered.get(id)
-        if (!d) throw new Error('No discovered path')
-        const updated = { ...c, outPathLen: d.outLen, outPath: d.outBytes }
+        if (!ctx?.route) throw new Error('No discovered path')
+        const { outLen, outBytes } = encodePath(ctx.route.out)
+        const updated = { ...c, outPathLen: outLen, outPath: outBytes }
         await this.expect(cmdUpdateContact(updated), Resp.OK)
         this.contacts.set(id, updated)
-        this.sink.node({ id, path: decodePath(d.outLen, d.outBytes), hops: pathHops(d.outLen) })
+        this.sink.node({ id, path: decodePath(outLen, outBytes), hops: pathHops(outLen) })
         this.sink.actionResult(id, action, true, 'Path saved')
         return
       }
@@ -703,7 +703,7 @@ export class MeshCoreClient implements RadioClient {
       case 'req-owner':
         return this.owner(id, c)
       case 'trace':
-        return this.trace(id, c)
+        return this.trace(id, c, ctx?.route)
       case 'share':
         try {
           await this.expect(cmdShareContact(c.publicKey), Resp.OK)
@@ -922,7 +922,6 @@ export class MeshCoreClient implements RadioClient {
       return this.sink.actionResult(id, 'path-discovery', false, `No answer (${hint})`)
     }
     const d = decodePathDiscovery(f)
-    this.discovered.set(id, { outLen: d.outLen, outBytes: d.outBytes })
     const self = this.self ? idOf(this.self.publicKey) : ''
     this.sink.traceroute({
       nodeId: id,
@@ -931,31 +930,39 @@ export class MeshCoreClient implements RadioClient {
       snrTowards: [],
       back: d.in ? [id, ...this.resolveHops(d.in), self] : undefined,
       discovered: true,
+      found: { out: d.out ?? [], back: d.in },
     })
   }
 
-  /** Trace out along the stored path to the node and back, recording SNR per hop. */
-  private async trace(id: string, c: Contact) {
-    // Without a known path, try it as a direct neighbour; a trace needs no login.
-    const unknownPath = c.outPathLen === OUT_PATH_FLOOD
-    const path = unknownPath ? [] : (decodePath(c.outPathLen, c.outPath) ?? [])
-    // Trace hashes are 1 byte per hop here; path hashes may be longer.
-    const first = path.map((h) => parseInt(h.slice(0, 2), 16))
-    const hashes = Uint8Array.from([...first, c.publicKey[0], ...[...first].reverse()])
+  /**
+   * Trace out to the node and back, recording SNR per hop. Follows the latest path discovery
+   * result; without one, the stored path out and its reverse back.
+   */
+  private async trace(id: string, c: Contact, found?: FoundRoute) {
+    const stored = decodePath(c.outPathLen, c.outPath)
+    const via = found ? 'found' : stored ? 'stored' : 'direct'
+    // Without any path, try it as a direct neighbour; a trace needs no login.
+    const out = found?.out ?? stored ?? []
+    const back = found?.back ?? [...out].reverse()
+    const { hashes, pathSz, size } = traceHashes(out, c.publicKey, back)
     const tag = crypto.getRandomValues(new Uint32Array(1))[0]
-    const f = await this.remote(cmdTracePath(tag, hashes), [Push.TRACE_DATA], (f) => decodeTraceData(f).tag === tag)
-    if (!f) return this.sink.actionResult(id, 'trace', false, unknownPath ? 'No answer as a direct neighbour (no known path)' : 'No answer')
+    const f = await this.remote(cmdTracePath(tag, hashes, pathSz), [Push.TRACE_DATA], (f) => decodeTraceData(f).tag === tag)
+    if (!f) {
+      const text =
+        via === 'direct' ? 'No answer as a direct neighbour (no stored or found path)' : `No answer along the ${via} path`
+      const room = c.type === ContactType.ROOM ? '; rooms pass a trace on only with repeat on' : ''
+      return this.sink.actionResult(id, 'trace', false, text + room)
+    }
     const t = decodeTraceData(f)
     const self = this.self ? idOf(this.self.publicKey) : ''
-    const via = this.resolveHops(path)
-    const out = path.length + 1
     this.sink.traceroute({
       nodeId: id,
       ts: Date.now(),
-      towards: [self, ...via, id],
-      snrTowards: t.snrs.slice(0, out),
-      back: [id, ...[...via].reverse(), self],
-      snrBack: [...t.snrs.slice(out), t.finalSnr],
+      towards: [self, ...this.resolveHops(out), id],
+      snrTowards: t.snrs.slice(0, out.length + 1),
+      back: [id, ...this.resolveHops(back), self],
+      snrBack: [...t.snrs.slice(out.length + 1), t.finalSnr],
+      traced: { via, foundTs: found?.ts, hashBytes: size },
     })
   }
 

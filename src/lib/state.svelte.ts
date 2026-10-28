@@ -4,6 +4,7 @@ import type {
   Capabilities,
   Channel,
   ContactSettings,
+  FoundRoute,
   MeshNode,
   Message,
   Protocol,
@@ -79,6 +80,8 @@ class AppState {
   traceroutes = $state<Record<string, TracerouteResult>>({})
   /** Newest first, per node, this session. */
   traceHistory = $state<Record<string, TracerouteResult[]>>({})
+  /** MeshCore: latest route found by path discovery, per node. */
+  foundRoutes = $state<Record<string, FoundRoute>>({})
   /** Pending request action per node id. */
   busy = $state<Record<string, string>>({})
   /** Latest result per node id and action. */
@@ -445,6 +448,7 @@ class AppState {
         const tr = started ? { ...r, rttMs: r.ts - started } : r
         this.traceroutes[r.nodeId] = tr
         this.traceHistory[r.nodeId] = [tr, ...(this.traceHistory[r.nodeId] ?? [])].slice(0, 20)
+        if (r.found) this.foundRoutes[r.nodeId] = { ts: r.ts, ...r.found }
         this.#saveNode(r.nodeId)
         if (a) this.#result(r.nodeId, a, 'ok', `${r.towards.length - 1} hop${r.towards.length === 2 ? '' : 's'}`)
       },
@@ -476,6 +480,7 @@ class AppState {
             this.traceHistory[id] = d.traces
             this.traceroutes[id] = d.traces[0]
           }
+          if (d.route) this.foundRoutes[id] = d.route
           if (d.remote) this.remote[id] = d.remote
           if (d.samples) this.samples[id] = d.samples
         }
@@ -533,6 +538,7 @@ class AppState {
     this.dmPeers = []
     this.traceroutes = {}
     this.traceHistory = {}
+    this.foundRoutes = {}
     this.busy = {}
     this.results = {}
     this.remote = {}
@@ -722,6 +728,7 @@ class AppState {
         const remote = this.remote[nodeId]
         void saveNodeData(radio, nodeId, {
           traces: this.traceHistory[nodeId],
+          route: this.foundRoutes[nodeId],
           remote: remote && { ...remote, cli: redactCli(remote.cli).slice(-50) },
           samples: this.samples[nodeId],
         }).catch(() => {})
@@ -740,7 +747,7 @@ class AppState {
           if (this.results[nodeId]?.[action]?.ts === r.ts) this.#result(nodeId, action, 'failed', TIMEOUT_TEXT[action] ?? 'No answer')
         }, REQUEST_TIMEOUT_MS)
       }
-      this.#client.action(action, nodeId).catch((e) => {
+      this.#client.action(action, nodeId, { route: $state.snapshot(this.foundRoutes[nodeId]) }).catch((e) => {
         this.#result(nodeId, action, 'failed', e instanceof Error ? e.message : String(e))
         this.#log({ dir: 'error', kind: action, summary: String(e) })
       })

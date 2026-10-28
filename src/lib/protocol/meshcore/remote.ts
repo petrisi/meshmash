@@ -51,9 +51,22 @@ export const cmdSendCli = (prefix: Uint8Array, text: string) =>
     .bytes(utf8Encode(text))
     .finish()
 
-/** Trace along 1-byte hop hashes (flags path_sz = 0). */
-export const cmdTracePath = (tag: number, hashes: Uint8Array) =>
-  new LeWriter().u8(RemoteCmd.SEND_TRACE_PATH).u32(tag).u32(0).u8(0).bytes(hashes).finish()
+/** Trace along hop hashes of `1 << pathSz` bytes each (flags bits 0-1). */
+export const cmdTracePath = (tag: number, hashes: Uint8Array, pathSz = 0) =>
+  new LeWriter().u8(RemoteCmd.SEND_TRACE_PATH).u32(tag).u32(0).u8(pathSz & 3).bytes(hashes).finish()
+
+/**
+ * Hop list for a trace: out hops, the target, back hops (hex hashes in travel order).
+ * 2-byte hashes only when every hop has at least 2: repeaters that forwarded a multi-byte path
+ * (v1.14+) also read multi-byte traces (v1.11+), older ones read every byte as a hop.
+ */
+export function traceHashes(out: string[], target: Uint8Array, back: string[]) {
+  const hops = [...out, ...back]
+  const size = hops.length > 0 && hops.every((h) => h.length >= 4) ? 2 : 1
+  const bytes = (h: string) => Array.from({ length: size }, (_, i) => parseInt(h.slice(i * 2, i * 2 + 2), 16))
+  const hashes = Uint8Array.from([...out.flatMap(bytes), ...target.subarray(0, size), ...back.flatMap(bytes)])
+  return { hashes, pathSz: size === 2 ? 1 : 0, size }
+}
 
 /**
  * CMD_SEND_CONTROL_DATA with NODE_DISCOVER_REQ, sent zero-hop: [0x80][type mask][tag u32].

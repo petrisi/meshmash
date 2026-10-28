@@ -2,6 +2,7 @@ import type {
   Capabilities,
   Channel,
   ContactSettings,
+  FoundRoute,
   MeshNode,
   Message,
   Protocol,
@@ -55,6 +56,12 @@ export interface Probe {
   textLogged: number
 }
 
+/** What the app keeps about a node that an action may need. */
+export interface ActionContext {
+  /** Latest path discovery result. */
+  route?: FoundRoute
+}
+
 export interface SendOptions {
   /** Meshtastic packet id being answered. */
   replyTo?: number
@@ -74,7 +81,7 @@ export interface RadioClient {
   close(): Promise<void>
   /** localId is the id the UI already gave the pending message. */
   sendText(thread: ThreadKey, text: string, localId: string, opts?: SendOptions): Promise<void>
-  action(action: string, nodeId: string): Promise<void>
+  action(action: string, nodeId: string, ctx?: ActionContext): Promise<void>
   /** Log in to a server node; the outcome arrives as an actionResult for 'login'. */
   login?(nodeId: string, password: string): Promise<void>
   /** MeshCore contact handling. */
