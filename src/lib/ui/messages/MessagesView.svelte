@@ -3,6 +3,7 @@
   import { ago, distanceErrKm, distanceKm, km } from '../../format'
   import { app } from '../../state.svelte'
   import NodeDetail from '../nodes/NodeDetail.svelte'
+  import ChannelEditor from './ChannelEditor.svelte'
   import Conversation from './Conversation.svelte'
   import ThreadList from './ThreadList.svelte'
 
@@ -43,7 +44,7 @@
   })
 </script>
 
-<div class="grid">
+<div class="grid" class:editing={!!app.channelEditor}>
   <ThreadList />
   {#if thread}
     {#key thread}<Conversation {thread} />{/key}
@@ -51,14 +52,19 @@
     <div class="empty faint">Select a channel or conversation</div>
   {/if}
   <aside>
-    {#if peer}
+    {#if app.channelEditor}
+      {#key `${app.channelEditor.index}|${app.channelEditor.isNew}`}<ChannelEditor />{/key}
+    {:else if peer}
       <NodeDetail node={peer} compact />
       <div class="foot">
         <button class="ghost" onclick={() => app.showNode(peer.id)}>Open in Nodes →</button>
         <button class="ghost" onclick={() => app.closeDm(peer.id)}>Close conversation</button>
       </div>
     {:else if channel}
-      <div class="section"><span>Channel</span></div>
+      <div class="section">
+        <span>Channel</span>
+        {#if app.canEditChannels}<button class="ghost edit" onclick={() => app.editChannel(channel.index)}>Edit</button>{/if}
+      </div>
       <dl class="kv">
         <dt>Name</dt><dd>{channel.name}</dd>
         <dt>Index</dt><dd>{channel.index}</dd>
@@ -119,6 +125,12 @@
     flex-direction: column;
     align-items: flex-start;
     padding: 0 6px;
+  }
+  .edit {
+    padding: 0 6px;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
   }
   .people {
     padding: 0 6px 8px;
@@ -184,6 +196,12 @@
     }
     aside {
       display: none;
+    }
+    .grid.editing {
+      grid-template-columns: 260px 1fr 300px;
+    }
+    .grid.editing aside {
+      display: block;
     }
   }
 </style>

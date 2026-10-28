@@ -82,12 +82,12 @@ describe('decodeFromRadio', () => {
   it('decodes a channel with psk, name and mute flag', () => {
     const settings = new PbWriter().bytes(2, Uint8Array.of(1)).string(3, 'LongFast').message(7, new PbWriter().uint(1, 0).bool(2, true))
     const { channel } = as(decodeFromRadio(fromRadio(10, new PbWriter().uint(1, 2).message(2, settings).uint(3, 2))), 'channel')
-    expect(channel).toEqual({ index: 2, role: 2, name: 'LongFast', psk: Uint8Array.of(1), muted: true })
+    expect(channel).toEqual({ index: 2, role: 2, name: 'LongFast', psk: Uint8Array.of(1), muted: true, settings: settings.finish() })
   })
 
   it('defaults an omitted channel index and role to 0', () => {
     const { channel } = as(decodeFromRadio(fromRadio(10, new PbWriter())), 'channel')
-    expect(channel).toEqual({ index: 0, role: 0, name: '', psk: new Uint8Array(), muted: false })
+    expect(channel).toEqual({ index: 0, role: 0, name: '', psk: new Uint8Array(), muted: false, settings: new Uint8Array() })
   })
 
   it('decodes lora config with use_preset present', () => {

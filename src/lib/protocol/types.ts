@@ -1,6 +1,7 @@
 import type {
   Capabilities,
   Channel,
+  ChannelConfig,
   ContactSettings,
   FoundRoute,
   MeshNode,
@@ -82,6 +83,12 @@ export interface RadioClient {
   /** localId is the id the UI already gave the pending message. */
   sendText(thread: ThreadKey, text: string, localId: string, opts?: SendOptions): Promise<void>
   action(action: string, nodeId: string, ctx?: ActionContext): Promise<void>
+  /** A channel slot's stored name and key; undefined when the slot is free. */
+  channelConfig?(index: number): ChannelConfig | undefined
+  /** Writes a channel, reads it back, and reports the new list through sink.channels. */
+  setChannel?(c: ChannelConfig, isNew: boolean): Promise<void>
+  /** Frees a channel slot, reads it back, and reports the new list through sink.channels. */
+  deleteChannel?(index: number): Promise<void>
   /** Log in to a server node; the outcome arrives as an actionResult for 'login'. */
   login?(nodeId: string, password: string): Promise<void>
   /** MeshCore contact handling. */

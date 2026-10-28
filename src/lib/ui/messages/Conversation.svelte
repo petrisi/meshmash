@@ -148,6 +148,9 @@
       <span class="hash mono">{channel?.index}</span>
       <b>{title}</b>
       <span class="faint">{channel?.encryption}</span>
+      {#if channel && app.canEditChannels}
+        <button class="ghost pencil" title="Edit channel" onclick={() => app.editChannel(channel.index)}>✎</button>
+      {/if}
     {/if}
     {#if peer && isMt}
       <span class="faint" title="Meshtastic DMs use the node's public key when both sides know each other's keys">
@@ -284,6 +287,9 @@
     padding: 0 14px;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
+  }
+  .pencil {
+    padding: 0 6px;
   }
   .hash {
     color: var(--accent);

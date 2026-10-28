@@ -185,6 +185,15 @@ export class PbWriter {
     return this.bytes(no, new TextEncoder().encode(s))
   }
 
+  /** Re-encodes a decoded field unchanged (varints below 2^53). */
+  field(f: Field) {
+    if (f.type === WireType.Len) return this.bytes(f.no, f.value as Uint8Array)
+    if (f.type === WireType.Varint) return this.uint(f.no, f.value as number)
+    this.key(f.no, f.type)
+    for (const x of f.value as Uint8Array) this.out.push(x)
+    return this
+  }
+
   message(no: number, w: PbWriter) {
     return this.bytes(no, w.finish())
   }

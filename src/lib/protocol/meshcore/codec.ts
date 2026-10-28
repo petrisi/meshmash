@@ -21,6 +21,7 @@ export const Cmd = {
   SEND_STATUS_REQ: 27,
   GET_CONTACT_BY_KEY: 30,
   GET_CHANNEL: 31,
+  SET_CHANNEL: 32,
   SEND_TRACE_PATH: 36,
   SET_OTHER_PARAMS: 38,
   SEND_TELEMETRY_REQ: 39,
@@ -423,6 +424,15 @@ export const cmdAppStart = (appName: string) =>
   new LeWriter().u8(Cmd.APP_START).bytes(new Uint8Array(7)).bytes(utf8Encode(appName)).finish()
 export const cmdGetContacts = () => Uint8Array.of(Cmd.GET_CONTACTS)
 export const cmdGetChannel = (i: number) => Uint8Array.of(Cmd.GET_CHANNEL, i)
+/** CMD_SET_CHANNEL: [32][index][name, 32 bytes NUL-padded][secret 16]. */
+export function cmdSetChannel(i: number, name: string, secret: Uint8Array): Uint8Array {
+  const f = new Uint8Array(2 + 32 + 16)
+  f[0] = Cmd.SET_CHANNEL
+  f[1] = i
+  f.set(utf8Encode(name).subarray(0, 31), 2)
+  f.set(secret.subarray(0, 16), 34)
+  return f
+}
 export const cmdGetTime = () => Uint8Array.of(Cmd.GET_DEVICE_TIME)
 export const cmdSetTime = (secs: number) => new LeWriter().u8(Cmd.SET_DEVICE_TIME).u32(secs).finish()
 export const cmdGetBattery = () => Uint8Array.of(Cmd.GET_BATT_AND_STORAGE)

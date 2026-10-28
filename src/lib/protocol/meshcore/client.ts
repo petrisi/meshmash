@@ -1,6 +1,7 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
-import type { Channel, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
+import { sameBytes } from '../../model/channels'
+import type { Channel, ChannelConfig, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { Transport } from '../../transport/types'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { ActionContext, RadioClient, RadioSink } from '../types'
@@ -35,6 +36,7 @@ import {
   cmdDeviceQuery,
   cmdGetBattery,
   cmdGetChannel,
+  cmdSetChannel,
   cmdGetContactByKey,
   cmdGetContacts,
   cmdGetTime,
@@ -50,6 +52,7 @@ import {
   codeName,
   type Contact,
   ContactType,
+  type ChannelInfo,
   decodeChannelInfo,
   isHashtagChannel,
   decodeChannelMsg,
@@ -141,6 +144,8 @@ export class MeshCoreClient implements RadioClient {
   private unsaved = new Map<string, Contact>()
   private discovering: { tag: number; found: Map<string, DiscoverReply> } | null = null
   private secrets = new Map<number, Uint8Array>()
+  /** Used channel slots by index. */
+  private channelInfos = new Map<number, ChannelInfo>()
   /**
    * The radio matches only one outstanding remote request (login, status, telemetry, binary,
    * path discovery); a new one replaces the old. Requests therefore run one at a time.
@@ -332,26 +337,62 @@ export class MeshCoreClient implements RadioClient {
   }
 
   private async loadChannels(): Promise<Channel[]> {
-    const out: Channel[] = []
     const max = this.device?.maxChannels ?? 8
     for (let i = 0; i < max; i++) {
       try {
-        const c = decodeChannelInfo(await this.expect(cmdGetChannel(i), Resp.CHANNEL_INFO))
-        if (!c.name) continue
-        this.secrets.set(c.index, c.secret)
-        const hashtag = await isHashtagChannel(c.name, c.secret)
-        out.push({
-          index: c.index,
-          name: c.name,
-          kind: c.index === 0 && c.name === 'Public' ? 'public' : hashtag ? 'hashtag' : 'private',
-          encryption: hashtag ? 'hashtag key' : c.index === 0 ? 'public key' : 'AES-128',
-        })
+        this.keepChannel(decodeChannelInfo(await this.expect(cmdGetChannel(i), Resp.CHANNEL_INFO)))
       } catch (e) {
         if (e instanceof CommandError) break
         throw e
       }
     }
+    return this.channelList()
+  }
+
+  private keepChannel(c: ChannelInfo) {
+    if (c.name) {
+      this.channelInfos.set(c.index, c)
+      this.secrets.set(c.index, c.secret)
+    } else {
+      this.channelInfos.delete(c.index)
+      this.secrets.delete(c.index)
+    }
+  }
+
+  private async channelList(): Promise<Channel[]> {
+    const out: Channel[] = []
+    for (const c of [...this.channelInfos.values()].sort((a, b) => a.index - b.index)) {
+      const hashtag = await isHashtagChannel(c.name, c.secret)
+      out.push({
+        index: c.index,
+        name: c.name,
+        kind: c.index === 0 && c.name === 'Public' ? 'public' : hashtag ? 'hashtag' : 'private',
+        encryption: hashtag ? 'hashtag key' : c.index === 0 ? 'public key' : 'AES-128',
+      })
+    }
     return out
+  }
+
+  channelConfig(index: number): ChannelConfig | undefined {
+    const c = this.channelInfos.get(index)
+    return c && { index, name: c.name, key: c.secret }
+  }
+
+  /** An empty name marks a free slot; the firmware skips those when matching channel traffic. */
+  async deleteChannel(index: number) {
+    await this.expect(cmdSetChannel(index, '', new Uint8Array(16)), Resp.OK)
+    const got = decodeChannelInfo(await this.expect(cmdGetChannel(index), Resp.CHANNEL_INFO))
+    this.keepChannel(got)
+    this.sink.channels(await this.channelList())
+    if (got.name) throw new Error('The radio did not delete the channel')
+  }
+
+  async setChannel(c: ChannelConfig, _isNew: boolean) {
+    await this.expect(cmdSetChannel(c.index, c.name, c.key), Resp.OK)
+    const got = decodeChannelInfo(await this.expect(cmdGetChannel(c.index), Resp.CHANNEL_INFO))
+    this.keepChannel(got)
+    this.sink.channels(await this.channelList())
+    if (got.name !== c.name || !sameBytes(got.secret, c.key)) throw new Error('The radio did not keep the change')
   }
 
   async close() {

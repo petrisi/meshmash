@@ -78,6 +78,14 @@ export interface Channel {
   muted?: boolean
 }
 
+/** A channel slot as stored on the radio, for editing. */
+export interface ChannelConfig {
+  index: number
+  name: string
+  /** Meshtastic: 0, 1, 16 or 32 bytes. MeshCore: 16 bytes. */
+  key: Uint8Array
+}
+
 /**
  * Outgoing: pending (queued to radio) → sent (radio transmitted) → acked (DM recipient
  * confirmed) | failed. Incoming messages are "received".

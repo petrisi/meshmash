@@ -1,8 +1,10 @@
 import { capabilitiesFor, REPEAT_WINDOW_MS } from './model/capabilities'
+import { channelReplaced } from './model/channels'
 import type {
   ActionResult,
   Capabilities,
   Channel,
+  ChannelConfig,
   ContactSettings,
   FoundRoute,
   MeshNode,
@@ -20,7 +22,7 @@ import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, Probe, RadioClient, RadioSink } from './protocol/types'
 import { redactCli, sanitizeSink } from './sanitize'
-import { loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
+import { deleteMessages, loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
@@ -99,6 +101,8 @@ class AppState {
   view = $state<View>('messages')
   activeThread = $state<ThreadKey | null>(null)
   selectedNode = $state<string | null>(null)
+  /** The channel slot open in the channel editor. */
+  channelEditor = $state<{ index: number; isNew: boolean } | null>(null)
   /** Set by showOnMap; the map centres on this node when n changes. */
   mapFocus = $state<{ id: string; n: number } | null>(null)
   log = $state<LogEntry[]>([])
@@ -536,6 +540,7 @@ class AppState {
     this.channels = []
     this.messages = []
     this.dmPeers = []
+    this.channelEditor = null
     this.traceroutes = {}
     this.traceHistory = {}
     this.foundRoutes = {}
@@ -682,6 +687,72 @@ class AppState {
       if (this.results[nodeId]?.login?.ts === r.ts) this.#result(nodeId, 'login', 'failed', 'No answer')
     }, REQUEST_TIMEOUT_MS)
     this.#client.login(nodeId, password).catch((e) => this.#result(nodeId, 'login', 'failed', String(e?.message ?? e)))
+  }
+
+  get canEditChannels() {
+    return !!this.#client?.setChannel
+  }
+
+  /** Free channel slots. Meshtastic slot 0 is the primary channel and always in use. */
+  get freeChannelSlots(): number[] {
+    const used = new Set(this.channels.map((c) => c.index))
+    const max = this.session?.caps.maxChannels ?? 0
+    return Array.from({ length: max }, (_, i) => i).filter((i) => !used.has(i) && !(i === 0 && this.protocol === 'meshtastic'))
+  }
+
+  /** Opens the editor on a channel, or on the first free slot. */
+  editChannel(index?: number) {
+    if (index !== undefined) this.channelEditor = { index, isNew: false }
+    else if (this.freeChannelSlots.length) this.channelEditor = { index: this.freeChannelSlots[0], isNew: true }
+  }
+
+  channelConfig(index: number): ChannelConfig | undefined {
+    return this.#client?.channelConfig?.(index)
+  }
+
+  /** Whether saving `next` deletes the slot's history: a new channel, or a different one. */
+  replacesChannel(next: ChannelConfig, isNew: boolean) {
+    return isNew || channelReplaced(this.protocol ?? 'meshcore', this.channelConfig(next.index), next)
+  }
+
+  /** Writes a channel; a new or different channel starts with an empty thread. */
+  async saveChannel(next: ChannelConfig, isNew: boolean) {
+    const client = this.#client
+    if (!client?.setChannel) throw new Error('Not supported')
+    const replaced = this.replacesChannel(next, isNew)
+    await client.setChannel(next, isNew)
+    const thread: ThreadKey = `ch:${next.index}`
+    if (replaced) this.#dropThread(thread)
+    this.pushLog(`Channel ${next.index} saved`)
+    this.channelEditor = null
+    this.openThread(thread)
+  }
+
+  get canDeleteChannel() {
+    const ed = this.channelEditor
+    return !!this.#client?.deleteChannel && !!ed && !ed.isNew && !(ed.index === 0 && this.protocol === 'meshtastic')
+  }
+
+  /** Frees a channel slot and deletes its history. */
+  async deleteChannel(index: number) {
+    const client = this.#client
+    if (!client?.deleteChannel) throw new Error('Not supported')
+    await client.deleteChannel(index)
+    const thread: ThreadKey = `ch:${index}`
+    this.#dropThread(thread)
+    this.pushLog(`Channel ${index} deleted`)
+    this.channelEditor = null
+    if (this.activeThread === thread) this.activeThread = this.channels[0] ? `ch:${this.channels[0].index}` : null
+  }
+
+  /** Removes a thread's messages here and in storage. */
+  #dropThread(thread: ThreadKey) {
+    const gone = this.messages.filter((m) => m.thread === thread)
+    if (gone.length) {
+      this.messages = this.messages.filter((m) => m.thread !== thread)
+      void deleteMessages(this.session!.info.nodeId, gone.map((m) => m.id)).catch(() => {})
+    }
+    delete this.channelHeard[thread]
   }
 
   get canManageContacts() {

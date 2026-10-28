@@ -47,6 +47,12 @@ export async function saveMessage(radio: string, m: Message) {
   d.transaction(STORE, 'readwrite').objectStore(STORE).put(row)
 }
 
+export async function deleteMessages(radio: string, ids: string[]) {
+  const d = await db()
+  const store = d.transaction(STORE, 'readwrite').objectStore(STORE)
+  for (const id of ids) store.delete(`${radio}|${id}`)
+}
+
 interface NodeRow extends NodeData {
   key: string
   radio: string

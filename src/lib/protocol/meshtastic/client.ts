@@ -1,6 +1,7 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
-import type { Channel, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
+import { sameBytes } from '../../model/channels'
+import type { Channel, ChannelConfig, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import { hex, utf8Decode, utf8Encode } from '../bytes'
 import type { Probe, RadioClient, RadioSink, SendOptions } from '../types'
 import type { Transport } from '../../transport/types'
@@ -8,6 +9,7 @@ import {
   Admin,
   BROADCAST,
   type ChannelInfo,
+  decodeAdminChannel,
   decodeFromRadio,
   decodeNodeInfo,
   decodePosition,
@@ -18,7 +20,10 @@ import {
   decodeTelemetry,
   decodeUser,
   encodeAdminUint,
+  encodeDisableChannel,
+  encodeGetChannel,
   encodePosition,
+  encodeSetChannel,
   encodeTelemetryRequest,
   encodeUser,
   type FromRadio,
@@ -106,6 +111,8 @@ export class MeshtasticClient implements RadioClient {
   private pending = new Map<number, Pending>()
   /** Our want_response packet id → the node action waiting for its answer. */
   private requests = new Map<number, { action: string; nodeId: string }>()
+  /** Our admin request packet id → its waiting caller. */
+  private adminWaits = new Map<number, (payload: Uint8Array) => void>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private ready = false
   /** Packets are written one at a time, each after the radio took the previous one. */
@@ -374,6 +381,11 @@ export class MeshtasticClient implements RadioClient {
 
     const d = p.decoded
     if (!d) return
+    if (d.portnum === Port.ADMIN && d.requestId && this.adminWaits.has(d.requestId)) {
+      this.adminWaits.get(d.requestId)!(d.payload)
+      this.adminWaits.delete(d.requestId)
+      return
+    }
     const req = d.requestId ? this.requests.get(d.requestId) : undefined
     if (req && d.portnum !== Port.ROUTING) {
       this.requests.delete(d.requestId!)
@@ -601,6 +613,51 @@ export class MeshtasticClient implements RadioClient {
       this.pending.delete(id)
       this.sink.updateMessage(pend.localId, { settled: true })
     }, REPEAT_WINDOW_MS)
+  }
+
+  channelConfig(index: number): ChannelConfig | undefined {
+    const c = this.channelInfos[index]
+    return c && c.role !== 0 ? { index, name: c.name, key: c.psk } : undefined
+  }
+
+  /** New channels are secondaries; an edit keeps the role and the settings we do not edit. */
+  async setChannel(c: ChannelConfig, isNew: boolean) {
+    const old = this.channelInfos[c.index]
+    const role = c.index === 0 ? 1 : 2
+    await this.sendPacket(this.myNum, Port.ADMIN, encodeSetChannel(c.index, role, c.name, c.key, isNew ? undefined : old?.settings))
+    const got = decodeAdminChannel(await this.adminRequest(encodeGetChannel(c.index)))
+    if (!got || got.role !== role || got.name !== c.name || !sameBytes(got.psk, c.key))
+      throw new Error('The radio did not keep the change')
+    this.channelInfos[c.index] = got
+    this.sink.channels(this.channels())
+  }
+
+  /** Disables a secondary slot; the others keep their indexes. The primary cannot be disabled. */
+  async deleteChannel(index: number) {
+    if (index === 0) throw new Error('The primary channel cannot be deleted')
+    await this.sendPacket(this.myNum, Port.ADMIN, encodeDisableChannel(index))
+    const got = decodeAdminChannel(await this.adminRequest(encodeGetChannel(index)))
+    if (!got || got.role !== 0) throw new Error('The radio did not delete the channel')
+    this.channelInfos[index] = got
+    this.sink.channels(this.channels())
+  }
+
+  /** Sends an admin message to our radio and waits for its answer. */
+  private async adminRequest(payload: Uint8Array): Promise<Uint8Array> {
+    const id = this.packetId()
+    const answer = new Promise<Uint8Array>((resolve, reject) => {
+      // Covers radios that poll serial input only every ~20 s.
+      const timer = setTimeout(() => {
+        this.adminWaits.delete(id)
+        reject(new Error('No answer from the radio'))
+      }, 45_000)
+      this.adminWaits.set(id, (b) => {
+        clearTimeout(timer)
+        resolve(b)
+      })
+    })
+    await this.sendPacket(this.myNum, Port.ADMIN, payload, { wantResponse: true, id })
+    return answer
   }
 
   async action(action: string, id: string) {

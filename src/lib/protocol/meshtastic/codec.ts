@@ -106,6 +106,8 @@ export interface ChannelInfo {
   name: string
   psk: Uint8Array
   muted: boolean
+  /** ChannelSettings as received, to keep fields we do not edit. */
+  settings: Uint8Array
 }
 
 export interface LoRaConfig {
@@ -304,11 +306,12 @@ export function decodeMeshPacket(b: Uint8Array): MeshPacket {
 }
 
 function decodeChannel(b: Uint8Array): ChannelInfo {
-  const c: ChannelInfo = { index: 0, role: 0, name: '', psk: new Uint8Array(), muted: false }
+  const c: ChannelInfo = { index: 0, role: 0, name: '', psk: new Uint8Array(), muted: false, settings: new Uint8Array() }
   for (const f of fields(b)) {
     if (f.no === 1) c.index = asInt32(f.value)
     else if (f.no === 3) c.role = asUint(f.value)
     else if (f.no === 2) {
+      c.settings = asBytes(f.value)
       for (const s of fields(asBytes(f.value))) {
         if (s.no === 2) c.psk = asBytes(s.value)
         else if (s.no === 3) c.name = asString(s.value)
@@ -551,7 +554,39 @@ export function encodeAdminUint(field: number, value: number): Uint8Array {
   return new PbWriter().uint(field, value).finish()
 }
 
+/**
+ * AdminMessage set_channel. Without `keep` (a new channel): MQTT uplink and downlink off,
+ * exact position. With it, ChannelSettings fields other than key and name are kept.
+ */
+export function encodeSetChannel(index: number, role: number, name: string, psk: Uint8Array, keep?: Uint8Array): Uint8Array {
+  const s = new PbWriter()
+  if (keep) for (const f of fields(keep)) f.no !== 2 && f.no !== 3 && s.field(f)
+  else s.message(7, new PbWriter().uint(1, 32))
+  if (psk.length) s.bytes(2, psk)
+  if (name) s.string(3, name)
+  const ch = new PbWriter().uint(1, index).message(2, s).uint(3, role)
+  return new PbWriter().message(Admin.SET_CHANNEL, ch).finish()
+}
+
+/** AdminMessage set_channel that disables a secondary slot. */
+export function encodeDisableChannel(index: number): Uint8Array {
+  const ch = new PbWriter().uint(1, index).message(2, new PbWriter()).uint(3, 0)
+  return new PbWriter().message(Admin.SET_CHANNEL, ch).finish()
+}
+
+/** AdminMessage get_channel_request; the firmware takes index + 1. */
+export const encodeGetChannel = (index: number) => new PbWriter().uint(Admin.GET_CHANNEL_REQUEST, index + 1).finish()
+
+/** The channel in an AdminMessage get_channel_response, if it is one. */
+export function decodeAdminChannel(b: Uint8Array): ChannelInfo | undefined {
+  for (const f of fields(b)) if (f.no === Admin.GET_CHANNEL_RESPONSE) return decodeChannel(asBytes(f.value))
+  return undefined
+}
+
 export const Admin = {
+  GET_CHANNEL_REQUEST: 1,
+  GET_CHANNEL_RESPONSE: 2,
+  SET_CHANNEL: 33,
   REMOVE_BY_NODENUM: 38,
   SET_FAVORITE: 39,
   REMOVE_FAVORITE: 40,

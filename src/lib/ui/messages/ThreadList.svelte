@@ -69,7 +69,17 @@
   {:else}
   <div class="section">
     <span>Channels</span>
-    <span class="faint">{app.channels.length}/{app.session?.caps.maxChannels}</span>
+    <span class="faint">
+      {app.channels.length}/{app.session?.caps.maxChannels}
+      {#if app.canEditChannels}
+        <button
+          class="ghost add"
+          title={app.freeChannelSlots.length ? 'Add a channel' : 'No free slots'}
+          disabled={!app.freeChannelSlots.length}
+          onclick={() => app.editChannel()}>+</button
+        >
+      {/if}
+    </span>
   </div>
   {#each app.channels as ch (ch.index)}
     {@const k = `ch:${ch.index}` as const}
@@ -118,6 +128,12 @@
     background: var(--panel);
     border-right: 1px solid var(--border);
     padding-bottom: 8px;
+  }
+  .add {
+    padding: 0 6px;
+    margin-left: 4px;
+    font-size: 14px;
+    line-height: 1;
   }
   .search {
     width: calc(100% - 16px);
