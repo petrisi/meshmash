@@ -18,6 +18,7 @@ Development version, built from `main` with WiFi radios enabled:
 **Both protocols**
 - Protocol and firmware detection; the interface follows the radio's capabilities
 - Channels and direct messages with delivery state, search, unread markers and per-thread byte limits
+- Channel add, edit and delete
 - Node list with filters, signal, hops, battery and distance; node details with telemetry history charts
 - Map: OpenStreetMap tiles, node markers by type and last heard, direct links, traceroute and neighbour links of the selected node
 - Distances from coarse positions marked `~`; selected node's position uncertainty drawn on the map
@@ -29,15 +30,17 @@ Development version, built from `main` with WiFi radios enabled:
 - Traceroute with SNR per hop and history
 - Position, telemetry, user info and neighbour info requests
 - Replies and emoji reactions
-- Hop limit per message: kept per DM, one-off on channels; suggested when the other node was heard further away
+- Hop limit per message, kept per channel and DM; suggested when the other node was heard further away
+- Radio hop limit setting
+- Hops and last relay of received messages
 - PKI-encrypted direct messages marked 🔒, with readable PKI error messages
 - Position precision (`precision_bits`), also inferred for NodeDB positions that lack it
-- Favourite, ignore, remove from NodeDB
+- Favourite, ignore, remove from NodeDB; ignored node filter
 
 **MeshCore**
 - Repeater and room server login; status, telemetry (CayenneLPP), neighbours, owner info
 - Remote CLI console for administered nodes
-- Trace path and path discovery, with "use this path"
+- Trace path and path discovery, with "use this path"; trace follows the found route
 - Room server posts with authors
 - Discover nearby nodes (both-way SNR)
 - Contact links (`meshcore://contact/add`), auto-add settings, adding heard-but-unsaved nodes
