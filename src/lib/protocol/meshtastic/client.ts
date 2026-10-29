@@ -10,6 +10,7 @@ import {
   BROADCAST,
   type ChannelInfo,
   decodeAdminChannel,
+  decodeAdminLoRa,
   decodeFromRadio,
   decodeNodeInfo,
   decodePosition,
@@ -22,8 +23,10 @@ import {
   encodeAdminUint,
   encodeDisableChannel,
   encodeGetChannel,
+  encodeGetLoRaConfig,
   encodePosition,
   encodeSetChannel,
+  encodeSetHopLimit,
   encodeTelemetryRequest,
   encodeUser,
   type FromRadio,
@@ -297,7 +300,7 @@ export class MeshtasticClient implements RadioClient {
       voltage: self?.deviceMetrics?.voltage,
       position: this.toNode(self ?? { num: this.myNum }).position,
     }
-    this.sink.info(info, { maxChannels: 8, hopLimit: this.lora.hopLimit || 3 })
+    this.sink.info(info, { maxChannels: 8, hopLimit: this.hopLimit })
     for (const n of this.nodes.values()) this.sink.node(this.toNode(n))
     this.sink.channels(this.channels())
     this.ready = true
@@ -573,7 +576,7 @@ export class MeshtasticClient implements RadioClient {
         wantResponse: opts.wantResponse,
         replyId: opts.replyId,
         emoji: opts.emoji,
-        hopLimit: opts.hopLimit ?? (this.lora.hopLimit || 3),
+        hopLimit: opts.hopLimit ?? this.hopLimit,
         portnum,
         payload,
       }),
@@ -614,6 +617,20 @@ export class MeshtasticClient implements RadioClient {
       this.pending.delete(id)
       this.sink.updateMessage(pend.localId, { settled: true })
     }, REPEAT_WINDOW_MS)
+  }
+
+  /** The radio's hop limit; proto3 leaves out 0. 3 until the LoRa config arrives. */
+  private get hopLimit() {
+    return this.lora.raw ? (this.lora.hopLimit ?? 0) : 3
+  }
+
+  /** Writes the LoRa config with a new hop limit (no reboot) and reads it back. */
+  async setHopLimit(hops: number) {
+    if (!this.lora.raw) throw new Error('LoRa config not received')
+    await this.sendPacket(this.myNum, Port.ADMIN, encodeSetHopLimit(this.lora.raw, hops))
+    const got = decodeAdminLoRa(await this.adminRequest(encodeGetLoRaConfig()))
+    if (!got || (got.hopLimit ?? 0) !== hops) throw new Error('The radio did not keep the change')
+    this.lora = got
   }
 
   channelConfig(index: number): ChannelConfig | undefined {

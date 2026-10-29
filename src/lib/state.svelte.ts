@@ -733,6 +733,19 @@ class AppState {
     return !!this.#client?.deleteChannel && !!ed && !ed.isNew && !(ed.index === 0 && this.protocol === 'meshtastic')
   }
 
+  get canSetHopLimit() {
+    return !!this.#client?.setHopLimit
+  }
+
+  /** Sets the radio's hop limit, the default for everything it sends. */
+  async setHopLimit(hops: number) {
+    const client = this.#client
+    if (!client?.setHopLimit || !this.session) throw new Error('Not supported')
+    await client.setHopLimit(hops)
+    this.session.caps.hopLimit = hops
+    this.pushLog(`Hop limit set to ${hops}`)
+  }
+
   /** Frees a channel slot and deletes its history. */
   async deleteChannel(index: number) {
     const client = this.#client

@@ -89,6 +89,8 @@ export interface RadioClient {
   setChannel?(c: ChannelConfig, isNew: boolean): Promise<void>
   /** Frees a channel slot, reads it back, and reports the new list through sink.channels. */
   deleteChannel?(index: number): Promise<void>
+  /** Meshtastic: sets the radio's hop limit and reads it back. */
+  setHopLimit?(hops: number): Promise<void>
   /** Log in to a server node; the outcome arrives as an actionResult for 'login'. */
   login?(nodeId: string, password: string): Promise<void>
   /** MeshCore contact handling. */

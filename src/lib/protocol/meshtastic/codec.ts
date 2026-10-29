@@ -120,6 +120,8 @@ export interface LoRaConfig {
   hopLimit?: number
   txPower?: number
   overrideFrequency?: number
+  /** LoRaConfig as received, to keep fields we do not edit. */
+  raw?: Uint8Array
 }
 
 export interface Metadata {
@@ -323,7 +325,7 @@ function decodeChannel(b: Uint8Array): ChannelInfo {
 }
 
 function decodeLoRa(b: Uint8Array): LoRaConfig {
-  const l: LoRaConfig = {}
+  const l: LoRaConfig = { raw: b.slice() }
   for (const f of fields(b)) {
     switch (f.no) {
       case 1: l.usePreset = asBool(f.value); break
@@ -574,6 +576,25 @@ export function encodeDisableChannel(index: number): Uint8Array {
   return new PbWriter().message(Admin.SET_CHANNEL, ch).finish()
 }
 
+/** AdminMessage set_config with the LoRa section as received, hop limit replaced. */
+export function encodeSetHopLimit(lora: Uint8Array, hopLimit: number): Uint8Array {
+  const l = new PbWriter()
+  for (const f of fields(lora)) if (f.no !== 8) l.field(f)
+  if (hopLimit) l.uint(8, hopLimit)
+  return new PbWriter().message(Admin.SET_CONFIG, new PbWriter().message(6, l)).finish()
+}
+
+export const encodeGetLoRaConfig = () => new PbWriter().uint(Admin.GET_CONFIG_REQUEST, CONFIG_TYPE_LORA).finish()
+
+/** The LoRa section of an AdminMessage get_config_response, if it is one. */
+export function decodeAdminLoRa(b: Uint8Array): LoRaConfig | undefined {
+  for (const f of fields(b)) {
+    if (f.no !== Admin.GET_CONFIG_RESPONSE) continue
+    for (const s of fields(asBytes(f.value))) if (s.no === 6) return decodeLoRa(asBytes(s.value))
+  }
+  return undefined
+}
+
 /** AdminMessage get_channel_request; the firmware takes index + 1. */
 export const encodeGetChannel = (index: number) => new PbWriter().uint(Admin.GET_CHANNEL_REQUEST, index + 1).finish()
 
@@ -583,10 +604,16 @@ export function decodeAdminChannel(b: Uint8Array): ChannelInfo | undefined {
   return undefined
 }
 
+/** AdminMessage.ConfigType LORA_CONFIG. */
+const CONFIG_TYPE_LORA = 5
+
 export const Admin = {
   GET_CHANNEL_REQUEST: 1,
   GET_CHANNEL_RESPONSE: 2,
+  GET_CONFIG_REQUEST: 5,
+  GET_CONFIG_RESPONSE: 6,
   SET_CHANNEL: 33,
+  SET_CONFIG: 34,
   REMOVE_BY_NODENUM: 38,
   SET_FAVORITE: 39,
   REMOVE_FAVORITE: 40,

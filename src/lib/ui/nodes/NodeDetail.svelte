@@ -9,6 +9,7 @@
   import RouteView from './RouteView.svelte'
   import TelemetryHistory from './TelemetryHistory.svelte'
   import ContactSettingsPanel from './ContactSettingsPanel.svelte'
+  import HopLimitSetting from './HopLimitSetting.svelte'
   import { contactLink } from '../../protocol/meshcore/links'
   import { precisionRadiusM } from '../../map/geo'
 
@@ -114,6 +115,7 @@
     {#if node.publicKey}<dt>Public key</dt><dd class="mono" title={node.publicKey}>{node.publicKey}</dd>{/if}
     {#if !isSelf}<dt>Last heard</dt><dd>{ago(node.lastHeard, app.now)} ago</dd>{/if}
     {#if node.uptimeS !== undefined}<dt>Uptime</dt><dd>{uptime(node.uptimeS)}</dd>{/if}
+    {#if isSelf && app.canSetHopLimit}<HopLimitSetting />{/if}
   </dl>
 
   {#if !isSelf}
