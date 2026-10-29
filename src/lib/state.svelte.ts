@@ -569,7 +569,7 @@ class AppState {
   }
 
   pushLog(text: string) {
-    this.#log({ dir: 'info', kind: 'demo', summary: text })
+    this.#log({ dir: 'info', kind: 'app', summary: text })
   }
 
   markRead(thread: ThreadKey) {
