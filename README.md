@@ -4,18 +4,21 @@ Browser client for Meshtastic® and MeshCore LoRa mesh radios.
 
 Plug a radio in over USB, open the page, and meshmash detects whether it runs Meshtastic or
 MeshCore and adapts the interface to it. No install, no account, no server: the page talks to
-the radio directly over Web Serial, and everything it keeps stays in the browser.
+the radio directly over Web Serial, and everything it keeps stays in the browser. Radios on
+WiFi are reached through [meshmash-bridge](bridge/README.md), a small program run on the same
+computer.
 
 ![MeshCore repeater status, sensors and neighbours](docs/screenshots/mc-repeater.png)
 
 **Open meshmash: <https://www.simol.in/meshmash/>** (Chrome, Edge or another Chromium browser)
 
-Development version, built from `main` with WiFi radios enabled:
-<https://www.simol.in/meshmash-dev/>. It changes often and may break.
+Development version, built from `main`: <https://www.simol.in/meshmash-dev/>. It changes often
+and may break.
 
 ## Features
 
 **Both protocols**
+- USB radios over Web Serial; WiFi radios through meshmash-bridge
 - Protocol and firmware detection; the interface follows the radio's capabilities
 - Channels and direct messages with delivery state, search, unread markers and per-thread byte limits
 - Channel add, edit and delete
@@ -54,12 +57,14 @@ Development version, built from `main` with WiFi radios enabled:
 | ![Map with a coarse position selected](docs/screenshots/mt-map.png) Map, coarse position selected | ![Meshtastic nodes by distance](docs/screenshots/mt-nodes.png) Meshtastic nodes by distance, `~` = coarse |
 | ![Meshtastic channel messages](docs/screenshots/mt-messages.png) Meshtastic channel | ![Protocol log](docs/screenshots/mc-log.png) Protocol log |
 | ![MeshCore channel messages](docs/screenshots/mc-messages.png) MeshCore channel | ![MeshCore trace path history](docs/screenshots/mc-route.png) MeshCore two-hop trace and history |
-| ![Hop limit picker](docs/screenshots/mt-hops.png) Hop limit per message | ![Connect screen](docs/screenshots/connect.png) Connect screen |
+| ![Hop limit picker](docs/screenshots/mt-hops.png) Hop limit per message | ![Channel editor](docs/screenshots/mt-channel.png) Channel editor |
+| ![Own radio details with hop limit setting](docs/screenshots/mt-node-self.png) Own radio, hop limit setting | ![Connect screen](docs/screenshots/connect.png) Connect screen, USB and WiFi radios |
 
 ## Requirements
 
 - A Chromium-based desktop browser (Chrome, Edge, Opera): Web Serial is not available in Firefox or Safari
-- A Meshtastic or MeshCore (companion USB firmware) radio connected by USB
+- A Meshtastic or MeshCore (companion firmware) radio, connected by USB, or on WiFi with
+  [meshmash-bridge](bridge/README.md) running
 - Demo modes for both protocols work without a radio
 
 Bluetooth and radio configuration are not implemented yet.
@@ -74,9 +79,8 @@ npm test        # unit tests
 npm run build   # static build in dist/
 ```
 
-WiFi radios are an optional part of the build: `VITE_BRIDGE=1 npm run build` (or `npm run dev`)
-adds them, reached through the local [meshmash-bridge](bridge/README.md). Without the variable
-the build has no trace of it.
+WiFi radios need `VITE_BRIDGE=1` at build time (`VITE_BRIDGE=1 npm run build` or `npm run dev`).
+Without it the build has no WiFi code or UI.
 
 The protocol codecs are written from the firmware sources; no Meshtastic or MeshCore JavaScript
 libraries are used. Protocol notes are in [docs/](docs).
