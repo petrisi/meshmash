@@ -25,7 +25,7 @@
   let showLabels = $state(true)
   let showLinks = $state(true)
 
-  const filters = $derived(nodeFilters(app.protocol!))
+  const filters = $derived(nodeFilters(app.protocol!, filter === 'ignored' || app.nodes.some((n) => n.ignored)))
   const self = $derived(app.nodeById.get(app.selfId))
   const located = $derived(app.nodes.filter((n) => validPosition(n.position)))
   const shown = $derived.by(() => {

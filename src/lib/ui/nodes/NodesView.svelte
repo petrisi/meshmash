@@ -32,7 +32,8 @@
   const proto = $derived(app.protocol!)
   const selfNode = $derived(app.nodeById.get(app.selfId))
 
-  const filters = $derived(nodeFilters(proto))
+  // Ignored: shown while any node is ignored, and while selected.
+  const filters = $derived(nodeFilters(proto, filter === 'ignored' || app.nodes.some((n) => n.ignored)))
 
   const cols = $derived<Col[]>([
     { key: 'name', label: 'Name' },

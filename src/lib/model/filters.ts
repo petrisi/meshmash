@@ -8,7 +8,8 @@ export interface NodeFilter {
   test: (n: MeshNode) => boolean
 }
 
-export function nodeFilters(proto: Protocol): NodeFilter[] {
+/** `withIgnored`: add the Meshtastic "Ignored" filter. */
+export function nodeFilters(proto: Protocol, withIgnored = false): NodeFilter[] {
   return proto === 'meshcore'
     ? [
         { id: 'all', label: 'All', test: () => true },
@@ -24,6 +25,7 @@ export function nodeFilters(proto: Protocol): NodeFilter[] {
         { id: 'direct', label: 'Direct', test: (n) => n.hops === 0 },
         { id: '2h', label: 'Heard 2h', test: (n) => !!n.lastHeard && Date.now() - n.lastHeard < 7_200_000 },
         { id: 'infra', label: 'Routers', test: (n) => n.kind === 'router' },
+        ...(withIgnored ? [{ id: 'ignored', label: 'Ignored', test: (n: MeshNode) => !!n.ignored }] : []),
       ]
 }
 
