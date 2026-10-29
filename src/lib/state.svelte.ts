@@ -16,7 +16,11 @@ import type {
   ThreadKey,
   TracerouteResult,
 } from './model/types'
+import { DemoRadio } from './mock/demo'
 import { mockSession } from './mock/mock'
+import { relayByte } from './model/relay'
+import { initials } from './format'
+import { parseContactLink } from './protocol/meshcore/links'
 import { detectProtocol } from './protocol/detect'
 import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
@@ -114,6 +118,8 @@ class AppState {
   /** Releases the lock that marks the connected radio as open in this tab. */
   #releaseLock: (() => void) | null = null
   #client: RadioClient | null = null
+  /** Demo session: stands in for the radio's stored settings and answers. */
+  #demo: DemoRadio | null = null
   #transport: Transport | null = null
   /** Bumped by every connect and disconnect; an older attempt that finishes is dropped. */
   #connectGen = 0
@@ -149,6 +155,14 @@ class AppState {
     this.nodes = s.nodes
     this.channels = s.channels
     this.messages = s.messages
+    this.samples = s.samples
+    this.remote = {}
+    this.results = {}
+    this.busy = {}
+    this.traceHistory = {}
+    this.foundRoutes = {}
+    this.#demo = new DemoRadio(protocol, s.configs)
+    void this.#demo.init()
     this.dmPeers = [...new Set(s.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3)))]
     // Mark everything older than ~3h as read so unread badges look realistic.
     const cutoff = Date.now() - 3 * 3_600_000
@@ -195,6 +209,8 @@ class AppState {
         const ch = this.channels[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * this.channels.length)]
         const isMt = this.protocol === 'meshtastic'
         const hops = n.hops ?? 1
+        const direct = this.nodes.filter((x) => x.hops === 0 && x.id !== this.selfId)
+        const relay = hops === 0 ? n.id : direct[Math.floor(Math.random() * direct.length)]?.id
         this.messages.push({
           id: `rx-${Date.now()}`,
           thread: `ch:${ch.index}`,
@@ -206,6 +222,8 @@ class AppState {
           status: 'received',
           hops,
           hopStart: isMt ? Math.max(hops, 3) : undefined,
+          relay: isMt && relay ? relayByte(relay) : undefined,
+          packetId: isMt ? Math.floor(Math.random() * 2 ** 31) + 1 : undefined,
           snr: Math.round((Math.random() * 20 - 14) * 4) / 4,
           rssi: isMt ? Math.round(-128 + Math.random() * 55) : undefined,
         })
@@ -536,6 +554,7 @@ class AppState {
 
   #reset() {
     this.#stopTimers()
+    this.#demo = null
     this.session = null
     this.nodes = []
     this.channels = []
@@ -626,9 +645,10 @@ class AppState {
 
   /** Meshtastic: react to a message with an emoji. */
   react(target: Message, emoji: string, hopLimit?: number) {
-    if (!this.#client || target.packetId === undefined) return
+    if (target.packetId === undefined || (!this.#client && !this.#demo)) return
     const r: Message = { id: '', thread: target.thread, from: this.selfId, text: emoji, ts: Date.now(), status: 'sent', replyTo: target.packetId, reaction: true }
     this.#addReaction(r)
+    if (!this.#client) return
     const id = `local-${Date.now()}-${++localSeq}`
     this.#client
       .sendText(target.thread, emoji, id, { replyTo: target.packetId, reaction: true, hopLimit })
@@ -639,6 +659,8 @@ class AppState {
   send(thread: ThreadKey, text: string, replyTo?: Message, hopLimit?: number) {
     const id = `local-${Date.now()}-${++localSeq}`
     const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0, replyTo: replyTo?.packetId, hopLimit }
+    // Demo: the packet id a Meshtastic radio would give it, so it can be replied to.
+    if (this.#demo && this.protocol === 'meshtastic') msg.packetId = Math.floor(Math.random() * 2 ** 31) + 1
     this.messages.push(msg)
     this.markRead(thread)
     if (this.#client) {
@@ -682,6 +704,14 @@ class AppState {
 
   /** The password goes only to the radio; it is not stored. */
   login(nodeId: string, password: string) {
+    if (this.#demo) {
+      this.#result(nodeId, 'login', 'pending')
+      setTimeout(() => {
+        this.remote[nodeId] = { ...this.remote[nodeId], login: { role: password ? 'admin' : 'guest', ts: Date.now() } }
+        this.#result(nodeId, 'login', 'ok', password ? 'Logged in as admin' : 'Logged in as guest')
+      }, 1200)
+      return
+    }
     if (!this.#client?.login) return
     const r = this.#result(nodeId, 'login', 'pending')
     setTimeout(() => {
@@ -691,7 +721,7 @@ class AppState {
   }
 
   get canEditChannels() {
-    return !!this.#client?.setChannel
+    return !!this.#client?.setChannel || !!this.#demo
   }
 
   /** Free channel slots. Meshtastic slot 0 is the primary channel and always in use. */
@@ -708,7 +738,7 @@ class AppState {
   }
 
   channelConfig(index: number): ChannelConfig | undefined {
-    return this.#client?.channelConfig?.(index)
+    return this.#client ? this.#client.channelConfig?.(index) : this.#demo?.channelConfig(index)
   }
 
   /** Whether saving `next` deletes the slot's history: a new channel, or a different one. */
@@ -719,9 +749,11 @@ class AppState {
   /** Writes a channel; a new or different channel starts with an empty thread. */
   async saveChannel(next: ChannelConfig, isNew: boolean) {
     const client = this.#client
-    if (!client?.setChannel) throw new Error('Not supported')
+    const demo = this.#demo
+    if (!client?.setChannel && !demo) throw new Error('Not supported')
     const replaced = this.replacesChannel(next, isNew)
-    await client.setChannel(next, isNew)
+    if (client?.setChannel) await client.setChannel(next, isNew)
+    else this.channels = await demo!.setChannel(next)
     const thread: ThreadKey = `ch:${next.index}`
     if (replaced) this.#dropThread(thread)
     this.pushLog(`Channel ${next.index} saved`)
@@ -731,18 +763,19 @@ class AppState {
 
   get canDeleteChannel() {
     const ed = this.channelEditor
-    return !!this.#client?.deleteChannel && !!ed && !ed.isNew && !(ed.index === 0 && this.protocol === 'meshtastic')
+    return (!!this.#client?.deleteChannel || !!this.#demo) && !!ed && !ed.isNew && !(ed.index === 0 && this.protocol === 'meshtastic')
   }
 
   get canSetHopLimit() {
-    return !!this.#client?.setHopLimit
+    return !!this.#client?.setHopLimit || (!!this.#demo && this.protocol === 'meshtastic')
   }
 
   /** Sets the radio's hop limit, the default for everything it sends. */
   async setHopLimit(hops: number) {
     const client = this.#client
-    if (!client?.setHopLimit || !this.session) throw new Error('Not supported')
-    await client.setHopLimit(hops)
+    if (!this.session || (!client?.setHopLimit && !this.#demo)) throw new Error('Not supported')
+    if (client?.setHopLimit) await client.setHopLimit(hops)
+    else await new Promise((r) => setTimeout(r, 600))
     this.session.caps.hopLimit = hops
     this.pushLog(`Hop limit set to ${hops}`)
   }
@@ -750,8 +783,10 @@ class AppState {
   /** Frees a channel slot and deletes its history. */
   async deleteChannel(index: number) {
     const client = this.#client
-    if (!client?.deleteChannel) throw new Error('Not supported')
-    await client.deleteChannel(index)
+    const demo = this.#demo
+    if (!client?.deleteChannel && !demo) throw new Error('Not supported')
+    if (client?.deleteChannel) await client.deleteChannel(index)
+    else this.channels = await demo!.deleteChannel(index)
     const thread: ThreadKey = `ch:${index}`
     this.#dropThread(thread)
     this.pushLog(`Channel ${index} deleted`)
@@ -771,20 +806,45 @@ class AppState {
   }
 
   get canManageContacts() {
-    return !!this.#client?.getContactSettings
+    return !!this.#client?.getContactSettings || (!!this.#demo && this.protocol === 'meshcore')
   }
   getContactSettings() {
+    if (this.#demo) return Promise.resolve({ ...this.#demo.contactSettings })
     return this.#client?.getContactSettings?.() ?? Promise.reject(new Error('not supported'))
   }
   setContactSettings(s: ContactSettings) {
+    if (this.#demo) return Promise.resolve(void (this.#demo.contactSettings = { ...s }))
     return this.#client?.setContactSettings?.(s) ?? Promise.reject(new Error('not supported'))
   }
   /** Resolves with the new contact's node id. */
   importContact(link: string) {
+    if (this.#demo) return Promise.resolve().then(() => this.#demoImport(link))
     return this.#client?.importContact?.(link) ?? Promise.reject(new Error('not supported'))
   }
 
+  #demoImport(link: string): string {
+    const l = parseContactLink(link)
+    if (!l) throw new Error('Not a meshcore://contact/add link')
+    const id = l.publicKey.slice(0, 12)
+    if (!this.nodeById.has(id)) {
+      const kind = ({ 2: 'repeater', 3: 'room', 4: 'sensor' } as const)[l.type] ?? 'chat'
+      this.nodes.push({ id, longName: l.name, shortName: initials(l.name), kind, publicKey: l.publicKey })
+    }
+    return id
+  }
+
   cli(nodeId: string, text: string) {
+    const node = this.nodeById.get(nodeId)
+    if (this.#demo && node) {
+      const line = (dir: 'out' | 'in', t: string) => {
+        this.remote[nodeId] ??= {}
+        const r = this.remote[nodeId]
+        r.cli = [...(r.cli ?? []), { ts: Date.now(), dir, text: t }]
+      }
+      line('out', text)
+      setTimeout(() => line('in', this.#demo?.cliReply(node, text) ?? ''), 700)
+      return
+    }
     this.#client?.cli?.(nodeId, text).catch((e) => this.#log({ dir: 'error', kind: 'cli', summary: String(e) }))
   }
 
@@ -840,6 +900,31 @@ class AppState {
       return
     }
     // Demo implementations.
+    const demo = this.#demo
+    if (!demo) return
+    const isMt = this.protocol === 'meshtastic'
+    /** Answers after a delay, like a request over the air. */
+    const answer = (fn: () => string, ms = 1200 + Math.random() * 1500) => {
+      this.#result(nodeId, action, 'pending')
+      setTimeout(() => this.#demo === demo && this.#result(nodeId, action, 'ok', fn()), ms)
+    }
+    const setRemote = (patch: RemoteData) => (this.remote[nodeId] = { ...this.remote[nodeId], ...patch })
+    const snr = () => Math.round((Math.random() * 20 - 12) * 4) / 4
+    // Relays on the way: MeshCore repeaters, Meshtastic any node; hash = first id byte.
+    const relays = (n: number) => {
+      const pool = this.nodes.filter((x) => x.id !== nodeId && x.id !== this.selfId && (isMt ? x.kind !== 'client_mute' : x.kind === 'repeater'))
+      return Array.from({ length: n }, (_, i) => pool[(i * 7 + nodeId.charCodeAt(1)) % pool.length].id)
+    }
+    const hashOf = (id: string) => id.slice(0, 2)
+    const idOfHash = (h: string) => this.nodes.find((x) => x.id.startsWith(h) && x.kind === 'repeater')?.id ?? h
+    const traced = (r: Omit<TracerouteResult, 'nodeId' | 'ts'>) =>
+      answer(() => {
+        const tr: TracerouteResult = { nodeId, ts: Date.now(), rttMs: 1500 + Math.floor(Math.random() * 4000), ...r }
+        this.traceroutes[nodeId] = tr
+        this.traceHistory[nodeId] = [tr, ...(this.traceHistory[nodeId] ?? [])].slice(0, 20)
+        if (tr.found) this.foundRoutes[nodeId] = { ts: tr.ts, ...tr.found }
+        return `${tr.towards.length - 1} hop${tr.towards.length === 2 ? '' : 's'}`
+      })
     switch (action) {
       case 'advert-zero':
       case 'advert-flood':
@@ -861,34 +946,90 @@ class AppState {
         node.ignored = !node.ignored
         this.pushLog(`${node.ignored ? 'Ignored' : 'Unignored'} ${node.longName}`)
         return
-      case 'dm':
-        this.openDm(nodeId)
-        return
       case 'favorite':
         node.favorite = !node.favorite
         return
-      case 'traceroute':
-      case 'trace':
-      case 'path-discovery': {
-        this.busy[nodeId] = action
-        this.pushLog(`${action} → ${node.longName}`)
-        setTimeout(() => {
-          delete this.busy[nodeId]
-          const hops = node.hops ?? 2
-          const pool = this.nodes.filter((n) => n.id !== nodeId && n.id !== this.selfId && n.kind !== 'room')
-          const mid = Array.from({ length: hops }, (_, i) => pool[(i * 7 + nodeId.length) % pool.length].id)
-          const snr = () => Math.round((Math.random() * 20 - 12) * 4) / 4
-          this.traceroutes[nodeId] = {
-            nodeId,
-            ts: Date.now(),
-            towards: [this.selfId, ...mid, nodeId],
-            back: [nodeId, ...[...mid].reverse(), this.selfId],
-            snrTowards: Array.from({ length: hops + 1 }, snr),
-            snrBack: Array.from({ length: hops + 1 }, snr),
-          }
-          this.pushLog(`${action} ← ${node.longName}: ${hops} hop(s)`)
-        }, 1800)
+      case 'remove':
+        this.nodes = this.nodes.filter((n) => n.id !== nodeId)
+        if (this.selectedNode === nodeId) this.selectedNode = null
+        this.pushLog(`Removed ${node.longName}`)
         return
+      case 'req-position':
+        return answer(() => (node.position ? 'Position received' : 'No position shared'))
+      case 'exchange-info':
+        return answer(() => 'User info received')
+      case 'req-telemetry':
+        return answer(() => {
+          if (!isMt) {
+            const t = demo.telemetry(node)!
+            setRemote({ telemetry: t })
+            return `${t.readings.length} reading${t.readings.length === 1 ? '' : 's'}`
+          }
+          node.batteryPct = Math.min(100, Math.max(5, (node.batteryPct ?? 70) + Math.round(Math.random() * 4 - 2)))
+          node.voltage = Math.round((3.3 + node.batteryPct / 110) * 100) / 100
+          this.#sample(nodeId, { batteryPct: node.batteryPct, voltage: node.voltage })
+          return 'Telemetry received'
+        })
+      case 'req-neighbours':
+        return answer(() => {
+          const nb = demo.neighbours(this.nodes, [nodeId, this.selfId])!
+          setRemote({ neighbours: nb })
+          return `${nb.total} neighbour${nb.total === 1 ? '' : 's'}`
+        })
+      case 'discover':
+        return answer(() => {
+          const nb = demo.neighbours(this.nodes, [this.selfId], true)!
+          setRemote({ neighbours: nb })
+          return `${nb.total} node${nb.total === 1 ? '' : 's'} in direct range`
+        })
+      case 'req-status':
+        return answer(() => (setRemote({ status: demo.status(node) }), 'Status received'))
+      case 'req-owner':
+        return answer(() => (setRemote({ owner: demo.owner(node) }), 'Owner info received'))
+      case 'reset-path':
+        node.path = undefined
+        node.hops = undefined
+        this.#result(nodeId, action, 'ok', 'Path cleared; the next message floods')
+        return
+      case 'use-path': {
+        const route = this.foundRoutes[nodeId]
+        if (!route) return void this.#result(nodeId, action, 'failed', 'No discovered path')
+        node.path = [...route.out]
+        node.hops = route.out.length
+        this.#result(nodeId, action, 'ok', 'Path saved')
+        return
+      }
+      case 'traceroute': {
+        const mid = relays(node.hops ?? 2)
+        return traced({
+          towards: [this.selfId, ...mid, nodeId],
+          back: [nodeId, ...[...mid].reverse(), this.selfId],
+          snrTowards: Array.from({ length: mid.length + 1 }, snr),
+          snrBack: Array.from({ length: mid.length + 1 }, snr),
+        })
+      }
+      case 'path-discovery': {
+        const out = relays(Math.max(1, node.hops ?? 2)).map(hashOf)
+        const back = [...out].reverse()
+        return traced({
+          towards: [this.selfId, ...out.map(idOfHash), nodeId],
+          back: [nodeId, ...back.map(idOfHash), this.selfId],
+          snrTowards: [],
+          discovered: true,
+          found: { out, back },
+        })
+      }
+      case 'trace': {
+        const found = this.foundRoutes[nodeId]
+        const out = found?.out ?? node.path ?? []
+        const back = found?.back ?? [...out].reverse()
+        return traced({
+          towards: [this.selfId, ...out.map(idOfHash), nodeId],
+          back: [nodeId, ...back.map(idOfHash), this.selfId],
+          snrTowards: Array.from({ length: out.length + 1 }, snr),
+          snrBack: Array.from({ length: back.length + 1 }, snr),
+          traced: { via: found ? 'found' : node.path ? 'stored' : 'direct', foundTs: found?.ts, hashBytes: 1 },
+        })
       }
       default:
         this.pushLog(`${action} → ${node.longName} (not implemented in demo)`)

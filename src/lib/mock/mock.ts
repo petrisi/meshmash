@@ -1,14 +1,17 @@
 // Demo data for UI development without hardware. All names are fictional.
 import type {
   Channel,
+  ChannelConfig,
   MeshNode,
   Message,
   NodeKind,
   Protocol,
   RadioInfo,
+  Sample,
   ThreadKey,
 } from '../model/types'
 import { initials } from '../format'
+import { relayByte } from '../model/relay'
 
 function rng(seed: number) {
   return () => {
@@ -41,12 +44,21 @@ const CHAT = [
 
 const HOUR = 3_600_000
 const HOP_STARTS = [3, 3, 3, 3, 4, 5, 7]
+const REACTIONS = ['👍', '👍', '❤️', '😂', '🙏']
+/** The MeshCore Public channel's well-known secret. */
+const MC_PUBLIC = '8b3387e9c5cdea6ac9e5edbaa115cd72'
 
 function hex(r: () => number, n: number) {
   let s = ''
   for (let i = 0; i < n; i++) s += Math.floor(r() * 16).toString(16)
   return s
 }
+
+function bytes(r: () => number, n: number) {
+  return Uint8Array.from({ length: n }, () => Math.floor(r() * 256))
+}
+
+const fromHex = (h: string) => Uint8Array.from(h.match(/../g)!, (b) => parseInt(b, 16))
 
 function name(r: () => number) {
   return `${PLACES[Math.floor(r() * PLACES.length)]} ${THINGS[Math.floor(r() * THINGS.length)]}`
@@ -63,7 +75,11 @@ export interface MockSession {
   info: RadioInfo
   nodes: MeshNode[]
   channels: Channel[]
+  /** Stored names and keys, for the channel editor. MeshCore hashtag keys are filled in by the caller. */
+  configs: ChannelConfig[]
   messages: Message[]
+  /** Telemetry history for the radio and some nodes. */
+  samples: Record<string, Sample[]>
 }
 
 export function mockSession(protocol: Protocol): MockSession {
@@ -175,34 +191,83 @@ export function mockSession(protocol: Protocol): MockSession {
         { index: 9, name: 'Club ops', kind: 'private', encryption: 'AES-128' },
       ]
 
+  const configs: ChannelConfig[] = isMt
+    ? [
+        { index: 0, name: '', key: Uint8Array.of(1) },
+        { index: 1, name: 'Local', key: bytes(r, 32) },
+        { index: 2, name: 'Events', key: bytes(r, 16) },
+        { index: 3, name: 'Admin', key: bytes(r, 32) },
+      ]
+    : channels.map((c) => ({
+        index: c.index,
+        name: c.name,
+        key: c.kind === 'public' ? fromHex(MC_PUBLIC) : c.kind === 'private' ? bytes(r, 16) : new Uint8Array(16),
+      }))
+
   const peers = nodes.filter((n) => n.id !== selfId && (isMt || n.kind === 'chat'))
+  const direct = nodes.filter((n) => n.id !== selfId && n.hops === 0)
   const messages: Message[] = []
   let mid = 0
   const addThread = (thread: ThreadKey, n: number, participants: MeshNode[]) => {
+    const isDm = thread.startsWith('dm:')
+    const sent: Message[] = []
     let t = now - n * 0.4 * HOUR - r() * HOUR
     for (let i = 0; i < n; i++) {
       t += r() * 0.6 * HOUR
       const mine = r() < 0.25
       const from = mine ? self : participants[Math.floor(r() * participants.length)]
-      messages.push({
+      const earlier = sent.length && r() < 0.12 ? sent[Math.max(0, sent.length - 1 - Math.floor(r() * 4))] : undefined
+      // Meshtastic: the last relay is a node heard directly, now and then an unknown or shared byte.
+      const relay = mine || !isMt || from.hops === undefined ? undefined
+        : from.hops === 0 ? relayByte(from.id)
+        : r() < 0.85 && direct.length ? relayByte(direct[Math.floor(r() * direct.length)].id)
+        : Math.floor(r() * 255) + 1
+      const m: Message = {
         id: `m${mid++}`,
         thread,
         from: from.id,
-        text: CHAT[Math.floor(r() * CHAT.length)],
+        text: (!isMt && earlier && earlier.from !== from.id ? `@[${nodes.find((x) => x.id === earlier.from)!.longName}] ` : '') + CHAT[Math.floor(r() * CHAT.length)],
         ts: Math.min(t, now - 60_000),
-        status: mine ? (thread.startsWith('dm:') && r() < 0.85 ? 'acked' : 'sent') : 'received',
+        status: mine ? (isDm && r() < 0.85 ? 'acked' : 'sent') : 'received',
         hops: mine ? undefined : from.hops,
         hopStart: mine || !isMt ? undefined : Math.max(from.hops ?? 0, HOP_STARTS[Math.floor(r() * HOP_STARTS.length)]),
+        relay,
         snr: mine ? undefined : Math.round((r() * 20 - 14) * 4) / 4,
         rssi: mine || !isMt ? undefined : Math.round(-128 + r() * 55),
         repeats: mine ? Math.floor(r() * (isMt ? 2 : 5)) : undefined,
         settled: mine ? true : undefined,
-      })
+        packetId: isMt ? Math.floor(r() * 2 ** 31) + 1 : undefined,
+        replyTo: isMt ? earlier?.packetId : undefined,
+        pki: isMt && isDm && !mine ? true : undefined,
+      }
+      if (isMt && r() < 0.15) {
+        const who = [...new Set(Array.from({ length: 1 + Math.floor(r() * 3) }, () => (r() < 0.2 ? self : participants[Math.floor(r() * participants.length)]).id))]
+        m.reactions = who.map((w) => ({ emoji: REACTIONS[Math.floor(r() * REACTIONS.length)], from: w, ts: m.ts + 60_000 }))
+      }
+      sent.push(m)
+      messages.push(m)
     }
   }
   for (const ch of channels) addThread(`ch:${ch.index}`, Math.floor(r() * 40) + (ch.index === 0 ? 60 : 3), peers)
   for (const p of peers.slice(3, isMt ? 8 : 6)) addThread(`dm:${p.id}`, Math.floor(r() * 12) + 2, [p])
   messages.sort((a, b) => a.ts - b.ts)
 
-  return { info, nodes, channels, messages }
+  // A day of telemetry every 30 min: the radio, and nodes that report a battery.
+  const samples: Record<string, Sample[]> = {}
+  for (const n of [self, ...nodes.filter((x) => x.batteryPct !== undefined).slice(0, 25)]) {
+    let batt = n.batteryPct ?? 80
+    let util = n.channelUtil ?? 10
+    const list: Sample[] = []
+    for (let i = 47; i >= 0; i--) {
+      batt = Math.min(100, Math.max(5, batt + (r() - 0.55) * 3))
+      util = Math.max(0, util + (r() - 0.5) * 4)
+      const v: Record<string, number> = { batteryPct: Math.round(batt), voltage: Math.round((3.3 + batt / 110) * 100) / 100 }
+      if (isMt) Object.assign(v, { channelUtil: Math.round(util * 10) / 10, airUtilTx: Math.round(r() * 40) / 10 })
+      if (n.hops === 0 && n !== self) v.snr = Math.round(((n.snr ?? 0) + (r() - 0.5) * 6) * 4) / 4
+      list.push({ ts: now - i * 0.5 * HOUR, v })
+    }
+    samples[n.id] = list
+  }
+
+  return { info, nodes, channels, configs, messages, samples }
 }
