@@ -40,13 +40,12 @@
   )
   const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
-  // Meshtastic hop limit: the radio default unless overridden. A DM keeps its choice;
-  // on a channel it applies to the next message only.
+  // Meshtastic hop limit: the radio default unless overridden; each thread keeps its choice.
   const defHops = $derived(isMt ? app.session?.caps.hopLimit : undefined)
   const radio = $derived(app.session?.info.nodeId)
   let override = $state<number | null>(null)
   $effect(() => {
-    override = isDm && radio ? loadHopLimit(radio, thread) : null
+    override = radio ? loadHopLimit(radio, thread) : null
   })
   const hopLimit = $derived(override ?? defHops)
   /** How far away the other side was heard: the replied message, else the DM peer. */
@@ -59,14 +58,12 @@
   const suggest = $derived(hopLimit === undefined ? undefined : hopSuggestion(hopLimit, far?.hops))
   function setHops(n: number) {
     override = n === defHops ? null : n
-    if (isDm && radio) saveHopLimit(radio, thread, override)
+    if (radio) saveHopLimit(radio, thread, override)
     input?.focus()
   }
-  /** Hop limit to send with; a channel's one-off choice is used up. */
+  /** Hop limit to send with; undefined for the radio default. */
   function useHops() {
-    const h = override ?? undefined
-    if (!isDm) override = null
-    return h
+    return override ?? undefined
   }
   function keydown(e: KeyboardEvent) {
     if (e.key === 'Escape') replyTo = null
@@ -298,7 +295,6 @@
           : far.hops === 0
             ? `${far.who} was heard directly`
             : `${far.who} was heard ${far.hops} hop${far.hops === 1 ? '' : 's'} away`}
-        sticky={isDm}
         onpick={setHops}
       />
     {/if}

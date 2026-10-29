@@ -23,6 +23,7 @@ import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, Probe, RadioClient, RadioSink } from './protocol/types'
 import { redactCli, sanitizeSink } from './sanitize'
 import { deleteMessages, loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
+import { saveHopLimit } from './store/hopLimits'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
@@ -766,6 +767,7 @@ class AppState {
       void deleteMessages(this.session!.info.nodeId, gone.map((m) => m.id)).catch(() => {})
     }
     delete this.channelHeard[thread]
+    saveHopLimit(this.session!.info.nodeId, thread, null)
   }
 
   get canManageContacts() {

@@ -6,7 +6,6 @@
     def,
     suggest,
     reason,
-    sticky,
     onpick,
   }: {
     /** Hop limit the next message uses. */
@@ -16,8 +15,6 @@
     suggest?: number
     /** Why `suggest` is offered, e.g. "häli was heard 6 hops away". */
     reason?: string
-    /** DM: the choice stays for the thread; channel: next message only. */
-    sticky: boolean
     onpick: (hops: number) => void
   } = $props()
 
@@ -68,7 +65,7 @@
       </div>
       <p class="faint">
         Radio default {def}{reason ? ` · ${reason}` : ''}<br />
-        {sticky ? 'Kept for this conversation' : 'Next message only'} · 0 = direct neighbours only, no delivery receipt
+        Kept for this conversation · 0 = direct neighbours only, no delivery receipt
       </p>
     </div>
   {/if}

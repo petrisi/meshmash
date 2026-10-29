@@ -1,4 +1,4 @@
-// Per-radio hop limit chosen for a DM thread, kept until changed.
+// Per-radio hop limit chosen for a thread (DM or channel), kept until changed.
 import type { ThreadKey } from '../model/types'
 
 const key = (radio: string) => `meshmash.hopLimits.${radio}`
