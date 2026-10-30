@@ -380,15 +380,15 @@
   }
   .msg {
     display: grid;
-    /* time | sender | text | hops | snr | rpt  (+ rssi for Meshtastic) */
-    grid-template-columns: 38px 190px 1fr 40px 48px 40px;
+    /* time | sender | text | hops | snr | rpt  (+ rssi for Meshtastic); text never widens the row */
+    grid-template-columns: 38px 190px minmax(0, 1fr) 40px 48px 40px;
     gap: 8px;
     align-items: baseline;
     padding: 3px 14px 1px;
     border-left: 2px solid transparent;
   }
   .msg.mt {
-    grid-template-columns: 38px 190px 1fr 40px 48px 40px 40px;
+    grid-template-columns: 38px 190px minmax(0, 1fr) 40px 48px 40px 40px;
   }
   .colhead {
     overflow-y: hidden;
@@ -520,6 +520,7 @@
     padding: 6px 14px 0;
     font-size: 12px;
     min-width: 0;
+    overflow: hidden;
   }
   .snip {
     flex: 1;
