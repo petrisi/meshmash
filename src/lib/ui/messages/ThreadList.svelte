@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ago } from '../../format'
+  import { orderDms } from '../../model/dmOrder'
   import type { Message, ThreadKey } from '../../model/types'
   import { app } from '../../state.svelte'
   import Badge from '../Badge.svelte'
@@ -7,11 +8,83 @@
   const lastOf = (k: ThreadKey) => app.byThread.get(k)?.at(-1)
 
   const dms = $derived(
-    app.dmPeers
-      .map((id) => ({ id, node: app.nodeById.get(id), last: lastOf(`dm:${id}`) }))
-      // Newly opened threads without messages sort first.
-      .sort((a, b) => (b.last?.ts ?? Number.MAX_SAFE_INTEGER) - (a.last?.ts ?? Number.MAX_SAFE_INTEGER)),
+    orderDms(app.dmPeers, app.dmPins, (id) => lastOf(`dm:${id}`)?.ts).map((id) => ({
+      id,
+      node: app.nodeById.get(id),
+      last: lastOf(`dm:${id}`),
+      pinned: app.dmPins.includes(id),
+    })),
   )
+
+  // Drag to reorder pinned threads: mouse after a few pixels, touch after a long press.
+  let drag = $state<{ id: string; to: number } | null>(null)
+  let press: { id: string; x: number; y: number; timer?: ReturnType<typeof setTimeout>; el: HTMLElement; pointer: number } | null = null
+  let dragged = false
+  let rows: HTMLElement[] = $state([])
+
+  function pointerdown(e: PointerEvent, id: string) {
+    dragged = false
+    if (!app.dmPins.includes(id) || e.button !== 0) return
+    const el = e.currentTarget as HTMLElement
+    press = { id, x: e.clientX, y: e.clientY, el, pointer: e.pointerId }
+    if (e.pointerType === 'touch') press.timer = setTimeout(() => startDrag(), 400)
+  }
+  function startDrag() {
+    if (!press) return
+    press.el.setPointerCapture(press.pointer)
+    drag = { id: press.id, to: app.dmPins.indexOf(press.id) }
+    dragged = true
+  }
+  function pointermove(e: PointerEvent) {
+    if (!press) return
+    if (!drag) {
+      const far = Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5
+      if (far && e.pointerType === 'touch') return cancel() // a scroll, not a long press
+      if (far) startDrag()
+      if (!drag) return
+    }
+    e.preventDefault()
+    // Target slot: the first pinned row whose middle is below the pointer.
+    const pinnedRows = rows.slice(0, app.dmPins.length)
+    let to = pinnedRows.findIndex((r) => {
+      const b = r.getBoundingClientRect()
+      return e.clientY < b.top + b.height / 2
+    })
+    if (to < 0) to = pinnedRows.length
+    const from = app.dmPins.indexOf(drag.id)
+    drag.to = to > from ? to - 1 : to
+  }
+  function pointerup() {
+    if (drag) app.moveDm(drag.id, drag.to)
+    cancel()
+  }
+  function cancel() {
+    if (press?.timer) clearTimeout(press.timer)
+    press = null
+    drag = null
+  }
+  // A touch drag must not scroll the list; touchmove listeners are passive unless added like this.
+  let aside: HTMLElement
+  $effect(() => {
+    const stop = (e: TouchEvent) => drag && e.preventDefault()
+    aside.addEventListener('touchmove', stop, { passive: false })
+    return () => aside.removeEventListener('touchmove', stop)
+  })
+  function click(id: string) {
+    if (dragged) return void (dragged = false)
+    app.openThread(`dm:${id}`)
+  }
+  /** Where the dragged row would land: a line above row i, or below the last pinned row. */
+  function dropLine(i: number): 'above' | 'below' | null {
+    if (!drag) return null
+    const from = app.dmPins.indexOf(drag.id)
+    const slot = drag.to >= from ? drag.to + 1 : drag.to
+    if (slot === from || slot === from + 1) return null
+    if (slot === i) return 'above'
+    return slot === app.dmPins.length && i === app.dmPins.length - 1 ? 'below' : null
+  }
+
+  const PIN = 'M9 3h6l-1 6 3 3v2H7v-2l3-3zM12 14v7'
 
   let query = $state('')
   const results = $derived.by(() => {
@@ -40,7 +113,7 @@
   }
 </script>
 
-<aside>
+<aside bind:this={aside}>
   <input
     class="search"
     type="search"
@@ -102,20 +175,41 @@
     <span>Direct messages</span>
     <span class="faint">{dms.length}</span>
   </div>
-  {#each dms as d (d.id)}
+  {#each dms as d, i (d.id)}
     {@const k = `dm:${d.id}` as const}
     {@const u = app.unread(k)}
-    <button class="row ghost" class:active={app.activeThread === k} onclick={() => app.openThread(k)}>
-      <Badge id={d.id} label={d.node?.shortName ?? '?'} size={26} />
-      <span class="main">
-        <span class="top">
-          <span class="name" class:unread={u}>{d.node?.longName ?? d.id}</span>
-          <span class="time faint">{ago(d.last?.ts, app.now)}</span>
+    {@const line = dropLine(i)}
+    <div class="dm" class:counted={!!u} class:above={line === 'above'} class:below={line === 'below'} bind:this={rows[i]}>
+      <button
+        class="row ghost"
+        class:active={app.activeThread === k}
+        class:dragging={drag?.id === d.id}
+        onclick={() => click(d.id)}
+        onpointerdown={(e) => pointerdown(e, d.id)}
+        onpointermove={pointermove}
+        onpointerup={pointerup}
+        onpointercancel={cancel}
+        oncontextmenu={(e) => drag && e.preventDefault()}
+      >
+        <Badge id={d.id} label={d.node?.shortName ?? '?'} size={26} />
+        <span class="main">
+          <span class="top">
+            <span class="name" class:unread={u}>{d.node?.longName ?? d.id}</span>
+            {#if d.pinned}<svg class="mark" viewBox="0 0 24 24" width="11" height="11"><title>Pinned</title><path d={PIN} /></svg>{/if}
+            <span class="time faint">{ago(d.last?.ts, app.now)}</span>
+          </span>
+          <span class="preview muted">{preview(k)}</span>
         </span>
-        <span class="preview muted">{preview(k)}</span>
-      </span>
-      {#if u}<b class="count">{u}</b>{/if}
-    </button>
+        {#if u}<b class="count">{u}</b>{/if}
+      </button>
+      <button
+        class="pin ghost"
+        title={d.pinned ? 'Unpin · drag to reorder' : 'Pin to top'}
+        onclick={() => app.pinDm(d.id, !d.pinned)}
+      >
+        <svg viewBox="0 0 24 24" width="13" height="13"><path d={PIN} /></svg>
+      </button>
+    </div>
   {:else}
     <p class="faint empty">Open a node and choose “Direct message”.</p>
   {/each}
@@ -150,6 +244,56 @@
     text-align: left;
     border: none;
     border-left: 2px solid transparent;
+  }
+  .dm {
+    position: relative;
+  }
+  .dm.above::before,
+  .dm.below::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: var(--accent);
+    z-index: 1;
+  }
+  .dm.above::before {
+    top: -1px;
+  }
+  .dm.below::after {
+    bottom: -1px;
+  }
+  .row.dragging {
+    opacity: 0.5;
+  }
+  .pin {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    padding: 2px 4px;
+    line-height: 0;
+    border-radius: 3px;
+    background: var(--panel-2);
+    opacity: 0;
+  }
+  .dm.counted .pin {
+    right: 40px;
+  }
+  .dm:hover .pin,
+  .pin:focus-visible {
+    opacity: 1;
+  }
+  .pin svg,
+  .mark {
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+  }
+  .mark {
+    color: var(--accent);
+    align-self: center;
   }
   .row.active {
     background: var(--accent-soft);

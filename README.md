@@ -22,6 +22,7 @@ and may break.
 - Protocol and firmware detection; the interface follows the radio's capabilities
 - Channels and direct messages with delivery state, search, unread markers and per-thread byte limits
 - Channel add, edit and delete
+- Direct message threads can be pinned and reordered; closed threads stay closed until a new message
 - Node list with filters, signal, hops, battery and distance; node details with telemetry history charts
 - Map: OpenStreetMap tiles, node markers by type and last heard, direct links, traceroute and neighbour links of the selected node
 - Distances from coarse positions marked `~`; selected node's position uncertainty drawn on the map

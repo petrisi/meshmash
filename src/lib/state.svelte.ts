@@ -18,6 +18,7 @@ import type {
 } from './model/types'
 import { DemoRadio } from './mock/demo'
 import { mockSession } from './mock/mock'
+import { movePin } from './model/dmOrder'
 import { relayByte } from './model/relay'
 import { initials } from './format'
 import { parseContactLink } from './protocol/meshcore/links'
@@ -27,6 +28,7 @@ import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, Probe, RadioClient, RadioSink } from './protocol/types'
 import { redactCli, sanitizeSink } from './sanitize'
 import { deleteMessages, loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
+import { loadDmList, saveDmList } from './store/dmList'
 import { saveHopLimit } from './store/hopLimits'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
@@ -77,8 +79,12 @@ class AppState {
   nodes = $state<MeshNode[]>([])
   channels = $state<Channel[]>([])
   messages = $state<Message[]>([])
-  /** DM threads the user keeps open, newest activity first via `threads`. */
+  /** DM threads the user keeps open; listed in `orderDms` order. */
   dmPeers = $state<string[]>([])
+  /** Pinned DM peers, in the user's order. */
+  dmPins = $state<string[]>([])
+  /** DM peers closed by the user → when; a later message or opening the thread brings one back. */
+  #dmClosed: Record<string, number> = {}
   lastRead = $state<Record<string, number>>({})
   /** Where the reader left off in the thread just opened, for the "New messages" divider. */
   readMark = $state<{ thread: ThreadKey; ts: number } | null>(null)
@@ -164,6 +170,8 @@ class AppState {
     this.#demo = new DemoRadio(protocol, s.configs)
     void this.#demo.init()
     this.dmPeers = [...new Set(s.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3)))]
+    this.dmPins = []
+    this.#dmClosed = {}
     // Mark everything older than ~3h as read so unread badges look realistic.
     const cutoff = Date.now() - 3 * 3_600_000
     this.lastRead = Object.fromEntries([...this.byThread.keys()].map((k) => [k, cutoff]))
@@ -452,8 +460,7 @@ class AppState {
         if (this.messages.some((x) => x.id === m.id)) return
         this.messages.push(m)
         persist(m)
-        const peer = m.thread.slice(3)
-        if (m.thread.startsWith('dm:') && !this.dmPeers.includes(peer)) this.dmPeers = [peer, ...this.dmPeers]
+        if (m.thread.startsWith('dm:')) this.#showDm(m.thread.slice(3))
         if (this.activeThread === m.thread && this.view === 'messages') this.markRead(m.thread)
       },
       updateMessage: (id, patch) => {
@@ -516,8 +523,15 @@ class AppState {
         }
         const ids = new Set(this.messages.map((m) => m.id))
         this.messages = [...history.filter((m) => !ids.has(m.id)), ...this.messages].sort((a, b) => a.ts - b.ts)
-        const dms = this.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3))
-        this.dmPeers = [...new Set(dms)]
+        const dms = new Set(this.messages.filter((m) => m.thread.startsWith('dm:')).map((m) => m.thread.slice(3)))
+        const list = loadDmList(radioKey())
+        this.dmPins = list.pins
+        // Closed stays closed until a message newer than the close; also those received while away.
+        this.#dmClosed = Object.fromEntries(
+          Object.entries(list.closed).filter(([id, ts]) => dms.has(id) && (this.byThread.get(`dm:${id}`)?.at(-1)?.ts ?? 0) <= ts),
+        )
+        this.dmPeers = [...new Set([...dms, ...list.pins])].filter((id) => !(id in this.#dmClosed))
+        this.#saveDmList()
         // Threads never opened on this radio start as read.
         const read = loadLastRead(radioKey())
         this.lastRead = Object.fromEntries([...this.byThread.keys()].map((k) => [k, read[k] ?? Date.now()]))
@@ -560,6 +574,8 @@ class AppState {
     this.channels = []
     this.messages = []
     this.dmPeers = []
+    this.dmPins = []
+    this.#dmClosed = {}
     this.channelEditor = null
     this.traceroutes = {}
     this.traceHistory = {}
@@ -605,20 +621,50 @@ class AppState {
 
   /** Opens a message's thread and scrolls to it. */
   showMessage(m: Message) {
-    if (m.thread.startsWith('dm:') && !this.dmPeers.includes(m.thread.slice(3))) this.dmPeers = [m.thread.slice(3), ...this.dmPeers]
+    if (m.thread.startsWith('dm:')) this.#showDm(m.thread.slice(3))
     this.openThread(m.thread)
     this.readMark = null
     this.focus = { id: m.id, at: Date.now() }
   }
 
   openDm(nodeId: string) {
-    if (!this.dmPeers.includes(nodeId)) this.dmPeers = [nodeId, ...this.dmPeers]
+    this.#showDm(nodeId)
     this.openThread(`dm:${nodeId}`)
   }
 
+  /** Hides the thread until a new message or the user opens it again; also unpins it. */
   closeDm(nodeId: string) {
     this.dmPeers = this.dmPeers.filter((id) => id !== nodeId)
+    this.dmPins = this.dmPins.filter((id) => id !== nodeId)
+    if (this.byThread.has(`dm:${nodeId}`)) this.#dmClosed[nodeId] = Date.now()
     if (this.activeThread === `dm:${nodeId}`) this.activeThread = 'ch:0'
+    this.#saveDmList()
+  }
+
+  pinDm(nodeId: string, pinned: boolean) {
+    if (pinned === this.dmPins.includes(nodeId)) return
+    this.dmPins = pinned ? [...this.dmPins, nodeId] : this.dmPins.filter((id) => id !== nodeId)
+    this.#saveDmList()
+  }
+
+  /** Moves a pinned thread to position `to` among the pinned ones. */
+  moveDm(nodeId: string, to: number) {
+    const next = movePin(this.dmPins, nodeId, to)
+    if (next === this.dmPins || next.every((id, i) => id === this.dmPins[i])) return
+    this.dmPins = next
+    this.#saveDmList()
+  }
+
+  #showDm(nodeId: string) {
+    if (!this.dmPeers.includes(nodeId)) this.dmPeers = [nodeId, ...this.dmPeers]
+    if (nodeId in this.#dmClosed) {
+      delete this.#dmClosed[nodeId]
+      this.#saveDmList()
+    }
+  }
+
+  #saveDmList() {
+    if (this.session && !this.isDemo) saveDmList(this.session.info.nodeId, { pins: this.dmPins, closed: this.#dmClosed })
   }
 
   showNode(nodeId: string) {

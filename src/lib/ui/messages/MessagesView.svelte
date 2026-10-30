@@ -58,6 +58,9 @@
       <NodeDetail node={peer} compact />
       <div class="foot">
         <button class="ghost" onclick={() => app.showNode(peer.id)}>Open in Nodes →</button>
+        <button class="ghost" onclick={() => app.pinDm(peer.id, !app.dmPins.includes(peer.id))}
+          >{app.dmPins.includes(peer.id) ? 'Unpin conversation' : 'Pin conversation'}</button
+        >
         <button class="ghost" onclick={() => app.closeDm(peer.id)}>Close conversation</button>
       </div>
     {:else if channel}

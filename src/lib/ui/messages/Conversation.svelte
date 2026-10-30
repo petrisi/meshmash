@@ -70,6 +70,13 @@
     else if (defHops !== undefined && e.altKey && /^Digit[0-7]$/.test(e.code)) {
       e.preventDefault()
       setHops(Number(e.code.slice(5)))
+    } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && thread.startsWith('dm:')) {
+      // Alt+↑/↓ moves a pinned conversation in the list.
+      const id = thread.slice(3)
+      const at = app.dmPins.indexOf(id)
+      if (at < 0) return
+      e.preventDefault()
+      app.moveDm(id, at + (e.key === 'ArrowUp' ? -1 : 1))
     }
   }
   const byPacket = $derived(new Map(msgs.filter((m) => m.packetId !== undefined).map((m) => [m.packetId!, m])))
