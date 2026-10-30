@@ -1,26 +1,16 @@
 <script lang="ts">
-  import { REPEAT_OK } from '../../model/capabilities'
+  import { canResend, deliveryState } from '../../model/delivery'
   import type { Message } from '../../model/types'
   import { app } from '../../state.svelte'
 
   let { m }: { m: Message } = $props()
 
   const repeats = $derived(m.repeats ?? 0)
-  const isDm = $derived(m.thread.startsWith('dm:'))
   // Meshtastic reports only that someone relayed (implicit ACK), not how many.
   const counts = $derived(app.protocol !== 'meshtastic')
-
-  // One state per message; DM recipient ACK outranks repeat counting.
-  const state = $derived.by(() => {
-    if (m.status === 'failed') return 'failed'
-    if (m.status === 'pending') return m.settled ? 'unknown' : 'queued'
-    if (isDm && m.status === 'acked') return 'delivered'
-    // Hop limit 0: no relay and no ACK to wait for.
-    if (m.hopLimit === 0) return 'direct'
-    if (repeats >= REPEAT_OK && (m.settled || !counts)) return 'ok'
-    if (!m.settled) return repeats ? 'counting' : 'waiting'
-    return repeats ? 'weak' : 'none'
-  })
+  const state = $derived(deliveryState(m, app.protocol))
+  const resend = $derived(canResend(m, app.selfId))
+  const attempt = $derived(m.attempt ? ` · attempt ${m.attempt + 1}` : '')
 
   const TITLE: Record<string, string> = {
     queued: 'Waiting for the radio to take the message',
@@ -36,7 +26,10 @@
   }
 </script>
 
-<span class="d {state}" title="{TITLE[state]}{counts && repeats ? ` · ${repeats} heard` : ''}">
+<span class="d {state}" title="{TITLE[state]}{state === 'ok' && m.thread.startsWith('dm:') ? '; recipient has not confirmed' : ''}{counts && repeats ? ` · ${repeats} heard` : ''}{attempt}">
+  {#if resend}
+    <button class="ghost again" title="Resend{attempt}" disabled={!app.canResend} onclick={() => app.resend(m)}>↻</button>
+  {/if}
   {#if state === 'queued' || state === 'waiting' || state === 'counting'}
     <i class="spin"></i>
   {:else if state === 'delivered'}
@@ -58,6 +51,15 @@
     justify-content: flex-end;
     gap: 4px;
     width: 100%;
+  }
+  .again {
+    padding: 0 2px;
+    line-height: 1;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .again:hover:not(:disabled) {
+    color: var(--accent);
   }
   .n {
     min-width: 1ch;

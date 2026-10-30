@@ -4,7 +4,7 @@ import { sameBytes } from '../../model/channels'
 import type { Channel, ChannelConfig, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { Transport } from '../../transport/types'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
-import type { ActionContext, RadioClient, RadioSink } from '../types'
+import type { ActionContext, RadioClient, RadioSink, SendOptions } from '../types'
 import { type ClockFix, clockFixes, correctRadioSecs, recordClockFix } from './clockFix'
 import { parseContactLink } from './links'
 import {
@@ -668,8 +668,8 @@ export class MeshCoreClient implements RadioClient {
 
   // Outgoing
 
-  async sendText(thread: ThreadKey, text: string, localId: string) {
-    const ts = Math.floor((Date.now() + this.clockOffset) / 1000)
+  async sendText(thread: ThreadKey, text: string, localId: string, opts: SendOptions = {}) {
+    const ts = opts.resend?.senderTs ?? Math.floor((Date.now() + this.clockOffset) / 1000)
     if (thread.startsWith('ch:')) {
       const index = Number(thread.slice(3))
       const secret = this.secrets.get(index)
@@ -685,8 +685,8 @@ export class MeshCoreClient implements RadioClient {
     }
     const c = this.contacts.get(thread.slice(3))
     if (!c) throw new Error('unknown contact')
-    const sent = decodeSent(await this.expect(cmdSendText(c.publicKey, text, ts), Resp.SENT))
-    this.sink.updateMessage(localId, { status: 'sent' })
+    const sent = decodeSent(await this.expect(cmdSendText(c.publicKey, text, ts, opts.resend?.attempt ?? 0), Resp.SENT))
+    this.sink.updateMessage(localId, { status: 'sent', senderTs: ts })
     const timer = setTimeout(
       () => {
         this.acks.delete(sent.tag)

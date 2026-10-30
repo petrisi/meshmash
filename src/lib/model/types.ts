@@ -127,6 +127,10 @@ export interface Message {
   pki?: boolean
   /** Outgoing, Meshtastic: hop limit chosen instead of the radio default. */
   hopLimit?: number
+  /** Outgoing: times sent again by the user (0 or absent: first send only). */
+  attempt?: number
+  /** Outgoing DM, MeshCore: timestamp in the message (radio clock, seconds), reused on a resend. */
+  senderTs?: number
 }
 
 export interface RadioParams {

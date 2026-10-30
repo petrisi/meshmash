@@ -70,6 +70,12 @@ export interface SendOptions {
   reaction?: boolean
   /** Meshtastic hop limit for this message instead of the radio default (0-7). */
   hopLimit?: number
+  /**
+   * Send an earlier DM again. MeshCore reuses the timestamp with the next attempt number (the
+   * firmware's retry format). Meshtastic needs a new packet id: the radio drops ids it has had
+   * from the app recently (PhoneAPI::wasSeenRecently), so the recipient may show it twice.
+   */
+  resend?: { senderTs?: number; attempt: number }
 }
 
 export interface RadioClient {

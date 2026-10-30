@@ -18,6 +18,7 @@ import type {
 } from './model/types'
 import { DemoRadio } from './mock/demo'
 import { mockSession } from './mock/mock'
+import { canResend } from './model/delivery'
 import { movePin } from './model/dmOrder'
 import { relayByte } from './model/relay'
 import { initials } from './format'
@@ -25,7 +26,7 @@ import { parseContactLink } from './protocol/meshcore/links'
 import { detectProtocol } from './protocol/detect'
 import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
-import type { LogEntry, Probe, RadioClient, RadioSink } from './protocol/types'
+import type { LogEntry, Probe, RadioClient, RadioSink, SendOptions } from './protocol/types'
 import { redactCli, sanitizeSink } from './sanitize'
 import { deleteMessages, loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
 import { loadDmList, saveDmList } from './store/dmList'
@@ -709,15 +710,36 @@ class AppState {
     if (this.#demo && this.protocol === 'meshtastic') msg.packetId = Math.floor(Math.random() * 2 ** 31) + 1
     this.messages.push(msg)
     this.markRead(thread)
+    this.#transmit(msg, { replyTo: replyTo?.packetId, hopLimit })
+  }
+
+  /** The radio is connected (or the demo), so a DM can be sent again. */
+  get canResend() {
+    return !!this.session
+  }
+
+  /** Sends an unacknowledged DM again, in place (same row). */
+  resend(target: Message) {
+    const m = this.messages.find((x) => x.id === target.id)
+    if (!m || !this.session || !canResend(m, this.selfId)) return
+    const attempt = (m.attempt ?? 0) + 1
+    Object.assign(m, { status: 'pending', settled: false, repeats: 0, attempt })
+    this.#transmit(m, { replyTo: m.replyTo, hopLimit: m.hopLimit, resend: { senderTs: m.senderTs, attempt } })
+  }
+
+  #transmit(msg: Message, opts: SendOptions) {
+    const id = msg.id
     if (this.#client) {
       void saveMessage(this.session!.info.nodeId, msg).catch(() => {})
-      this.#client.sendText(thread, text, id, { replyTo: replyTo?.packetId, hopLimit }).catch((e) => {
+      this.#client.sendText(msg.thread, msg.text, id, opts).catch((e) => {
         const m = this.messages.find((x) => x.id === id)
         if (m) Object.assign(m, { status: 'failed', settled: true })
         this.#log({ dir: 'error', kind: 'send', summary: String(e) })
       })
       return
     }
+    const thread = msg.thread
+    const hopLimit = opts.hopLimit
     const isDm = thread.startsWith('dm:')
     // Updates are dropped if the message is gone (e.g. after disconnect).
     const later = (ms: number, fn: (m: Message) => void) =>
