@@ -15,6 +15,8 @@ export const Cmd = {
   RESET_PATH: 13,
   REMOVE_CONTACT: 15,
   SHARE_CONTACT: 16,
+  EXPORT_CONTACT: 17,
+  IMPORT_CONTACT: 18,
   GET_BATT_AND_STORAGE: 20,
   DEVICE_QUERY: 22,
   SEND_LOGIN: 26,
@@ -44,6 +46,7 @@ export const Resp = {
   CHANNEL_MSG_RECV: 8,
   CURR_TIME: 9,
   NO_MORE_MESSAGES: 10,
+  EXPORT_CONTACT: 11,
   BATT_AND_STORAGE: 12,
   DEVICE_INFO: 13,
   DISABLED: 15,
@@ -467,6 +470,11 @@ export const cmdSetOtherParams = (manualAdd: number, telemetryModes: number, adv
   Uint8Array.of(Cmd.SET_OTHER_PARAMS, manualAdd, telemetryModes, advertLocPolicy, multiAcks)
 
 export const cmdResetPath = (pk: Uint8Array) => new LeWriter().u8(Cmd.RESET_PATH).bytes(pk).finish()
+/** CMD_EXPORT_CONTACT: the stored advert of a contact, or this radio's own when no key is given. */
+export const cmdExportContact = (pk?: Uint8Array) =>
+  pk ? new LeWriter().u8(Cmd.EXPORT_CONTACT).bytes(pk).finish() : Uint8Array.of(Cmd.EXPORT_CONTACT)
+/** CMD_IMPORT_CONTACT: a raw advert packet, processed by the radio as if heard over the air. */
+export const cmdImportContact = (packet: Uint8Array) => new LeWriter().u8(Cmd.IMPORT_CONTACT).bytes(packet).finish()
 export const cmdRemoveContact = (pk: Uint8Array) => new LeWriter().u8(Cmd.REMOVE_CONTACT).bytes(pk).finish()
 export const cmdShareContact = (pk: Uint8Array) => new LeWriter().u8(Cmd.SHARE_CONTACT).bytes(pk).finish()
 export const cmdPathDiscovery = (pk: Uint8Array) =>

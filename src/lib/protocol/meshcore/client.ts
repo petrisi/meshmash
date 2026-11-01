@@ -6,7 +6,7 @@ import type { Transport } from '../../transport/types'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
 import type { ActionContext, RadioClient, RadioSink, SendOptions } from '../types'
 import { type ClockFix, clockFixes, correctRadioSecs, recordClockFix } from './clockFix'
-import { parseContactLink } from './links'
+import { advertLink, type ContactLink, decodeAdvertPacket, parseContactLink, verifyAdvert } from './links'
 import {
   cmdBinaryReq,
   cmdLogin,
@@ -48,6 +48,8 @@ import {
   cmdSendChannelText,
   cmdSendText,
   cmdShareContact,
+  cmdExportContact,
+  cmdImportContact,
   cmdSyncNext,
   codeName,
   type Contact,
@@ -110,6 +112,10 @@ class CommandError extends Error {}
 
 /** Repeaters reply after a random delay of a few seconds. */
 const DISCOVER_LISTEN_MS = 20_000
+/** The radio processes an imported advert on its next loop, right after the OK. */
+const IMPORT_PUSH_MS = 3_000
+/** Export replies come at once, except a held-back one (see exportContact). */
+const EXPORT_MS = 1_500
 
 /**
  * Login passwords and CLI traffic (which can carry passwords) stay out of the protocol log,
@@ -142,6 +148,9 @@ export class MeshCoreClient implements RadioClient {
   private ready = false
   private acks = new Map<number, { localId: string; timer: ReturnType<typeof setTimeout> }>()
   private unsaved = new Map<string, Contact>()
+  /** Imported adverts waiting for the radio's push: 'added' (stored) or 'heard' (not stored). */
+  private advertWaiters = new Map<string, (kind: 'added' | 'heard') => void>()
+  private lateExport: Uint8Array | null = null
   private discovering: { tag: number; found: Map<string, DiscoverReply> } | null = null
   private secrets = new Map<number, Uint8Array>()
   /** Used channel slots by index. */
@@ -185,6 +194,12 @@ export class MeshCoreClient implements RadioClient {
 
   private onResponse(f: Uint8Array) {
     const req = this.queue[0]
+    // A late export reply (see exportContact) is kept for it, not given to another request.
+    if (f[0] === Resp.EXPORT_CONTACT && req?.name !== cmdName(Cmd.EXPORT_CONTACT)) {
+      this.lateExport = f
+      this.sink.log({ dir: 'info', kind: codeName(f[0]), summary: 'late response' })
+      return
+    }
     if (!req) {
       this.sink.log({ dir: 'info', kind: codeName(f[0]), summary: 'unsolicited response' })
       return
@@ -429,8 +444,9 @@ export class MeshCoreClient implements RadioClient {
    * two, never in the future.
    */
   private lastHeard(c: Contact): number | undefined {
-    const mod = c.lastMod ? this.radioTime(correctRadioSecs(c.lastMod, this.clockFixes)) : 0
     const advert = c.lastAdvert * 1000
+    // An imported contact keeps the advert's own time as last change (importAdvert).
+    const mod = c.lastMod && c.lastMod !== c.lastAdvert ? this.radioTime(correctRadioSecs(c.lastMod, this.clockFixes)) : 0
     const t = Math.max(mod, advert <= Date.now() + 60_000 ? advert : 0)
     return t ? Math.min(t, Date.now()) : undefined
   }
@@ -510,6 +526,9 @@ export class MeshCoreClient implements RadioClient {
         const id = idOf(c.publicKey)
         if (this.contacts.has(id)) return
         this.unsaved.set(id, c)
+        // An imported advert was not heard now; the importer saves it.
+        const w = this.advertWaiters.get(id)
+        if (w) return w('heard')
         this.sink.node({ ...this.toNode(c), lastHeard: Date.now(), unsaved: true })
         this.sink.heard(id, Date.now())
         return
@@ -517,6 +536,8 @@ export class MeshCoreClient implements RadioClient {
       case Push.ADVERT:
       case Push.PATH_UPDATED: {
         const id = hex(f.subarray(1, 7))
+        const w = f[0] === Push.ADVERT ? this.advertWaiters.get(id) : undefined
+        if (w) return w('added') // the importer reads the contact back
         this.sink.heard(id, Date.now())
         this.sink.node({ id, lastHeard: Date.now() })
         void this.refreshContact(f.subarray(1, 33))
@@ -571,11 +592,11 @@ export class MeshCoreClient implements RadioClient {
     }
   }
 
-  private async refreshContact(pk: Uint8Array) {
+  private async refreshContact(pk: Uint8Array, heard = true) {
     try {
       const c = decodeContact(await this.expect(cmdGetContactByKey(pk), Resp.CONTACT))
       this.contacts.set(idOf(c.publicKey), c)
-      this.sink.node({ ...this.toNode(c), lastHeard: Date.now() })
+      this.sink.node({ ...this.toNode(c), ...(heard && { lastHeard: Date.now() }), unsaved: false })
     } catch {
       /* contact not stored (e.g. manual add mode) */
     }
@@ -885,9 +906,11 @@ export class MeshCoreClient implements RadioClient {
 
   async importContact(link: string): Promise<string> {
     const l = parseContactLink(link)
-    if (!l) throw new Error('Not a meshcore://contact/add link')
+    if (!l) throw new Error('Not a meshcore:// contact link')
     const pk = Uint8Array.from(l.publicKey.match(/../g)!.map((h) => parseInt(h, 16)))
     const id = idOf(pk)
+    if (this.self && idOf(this.self.publicKey) === id) throw new Error('That is this radio')
+    if (l.advert) return this.importAdvert(l, l.advert, pk, id)
     const existing = this.contacts.get(id)
     if (existing) return id
     await this.saveContact({
@@ -903,6 +926,78 @@ export class MeshCoreClient implements RadioClient {
       lastMod: 0,
     })
     return id
+  }
+
+  /**
+   * Advert link: the radio checks the signature and processes the advert as if heard, which
+   * stores it (name, type, location, timestamp, and the advert itself for sharing). Where it
+   * would not add the contact on its own (manual add, or auto-add off for the type), the
+   * contact is saved first and the advert imported again.
+   */
+  private async importAdvert(l: ContactLink, advert: Uint8Array, pk: Uint8Array, id: string): Promise<string> {
+    if ((await verifyAdvert(l)) === false) throw new Error('Advert signature does not match')
+    const existing = this.contacts.get(id)
+    // The radio ignores adverts not newer than the one it has.
+    if (existing && existing.lastAdvert >= (l.advertTs ?? 0)) return id
+    let kind = await this.importOnce(id, advert)
+    if (kind === 'heard') {
+      const c = this.unsaved.get(id)
+      if (!c) throw new Error('The radio did not add the contact')
+      await this.saveContact({ ...c, lastAdvert: Math.max(0, c.lastAdvert - 1) })
+      kind = await this.importOnce(id, advert)
+    }
+    if (kind === 'added') {
+      await this.refreshContact(pk, false)
+      // The radio stamps the import as the last change, which would read as heard just now.
+      const c = this.contacts.get(id)
+      if (c?.lastAdvert && c.lastMod > c.lastAdvert) await this.saveContact({ ...c, lastMod: c.lastAdvert })
+    } else if (!this.contacts.has(id)) throw new Error('The radio did not accept the advert')
+    return id
+  }
+
+  private async importOnce(id: string, advert: Uint8Array): Promise<'added' | 'heard' | undefined> {
+    let done: (k: 'added' | 'heard' | undefined) => void = () => {}
+    const pushed = new Promise<'added' | 'heard' | undefined>((res) => (done = res))
+    this.advertWaiters.set(id, done)
+    const timer = setTimeout(() => done(undefined), IMPORT_PUSH_MS)
+    try {
+      await this.expect(cmdImportContact(advert), Resp.OK)
+      return await pushed
+    } finally {
+      clearTimeout(timer)
+      this.advertWaiters.delete(id)
+    }
+  }
+
+  /** meshcore://<advert hex> from the advert the radio stored; null where it has none. */
+  async exportContact(nodeId: string): Promise<string | null> {
+    const isSelf = !!this.self && idOf(this.self.publicKey) === nodeId
+    const pk = isSelf ? undefined : this.contacts.get(nodeId)?.publicKey
+    if (!isSelf && !pk) return null
+    const want = hex(pk ?? this.self!.publicKey)
+    const matches = (f: Uint8Array | null) => !!f && decodeAdvertPacket(f.subarray(1))?.publicKey === want
+    let got: Uint8Array | null = null
+    this.lateExport = null
+    try {
+      await this.request(
+        cmdExportContact(pk),
+        (f) => {
+          if (f[0] !== Resp.EXPORT_CONTACT) throw new Error(`expected RESP_EXPORT_CONTACT, got ${codeName(f[0])}`)
+          if (!matches(f)) return false // a late reply to an earlier export
+          got = f
+          return true
+        },
+        EXPORT_MS,
+      )
+    } catch (e) {
+      if (e instanceof CommandError) return null
+      // Over USB, ESP32-S3 radios hold back a reply of exactly 128 bytes (a 124-byte advert)
+      // until they send something else; any command brings it.
+      await this.expect(cmdGetTime(), Resp.CURR_TIME).catch(() => {})
+      if (matches(this.lateExport)) got = this.lateExport
+    }
+    this.lateExport = null
+    return got ? advertLink((got as Uint8Array).subarray(1)) : null
   }
 
   async getContactSettings(): Promise<ContactSettings> {

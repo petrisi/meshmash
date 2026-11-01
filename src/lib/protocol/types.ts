@@ -102,8 +102,10 @@ export interface RadioClient {
   /** MeshCore contact handling. */
   getContactSettings?(): Promise<ContactSettings>
   setContactSettings?(s: ContactSettings): Promise<void>
-  /** Adds a contact from a meshcore://contact/add link. */
+  /** Adds a contact from a meshcore:// link (contact card or advert); resolves with its node id. */
   importContact?(link: string): Promise<string>
+  /** meshcore://<advert hex> for a contact or this radio; null where the radio has no advert stored. */
+  exportContact?(nodeId: string): Promise<string | null>
   /** Send a CLI command to a server node we administer. */
   cli?(nodeId: string, text: string): Promise<void>
 }

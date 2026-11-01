@@ -890,13 +890,20 @@ class AppState {
     return this.#client?.importContact?.(link) ?? Promise.reject(new Error('not supported'))
   }
 
+  /** A meshcore:// link for sharing a node: the radio's stored advert where it has one. */
+  exportContact(nodeId: string): Promise<string | null> {
+    if (this.#demo) return Promise.resolve(null)
+    return this.#client?.exportContact?.(nodeId) ?? Promise.resolve(null)
+  }
+
   #demoImport(link: string): string {
     const l = parseContactLink(link)
-    if (!l) throw new Error('Not a meshcore://contact/add link')
+    if (!l) throw new Error('Not a meshcore:// contact link')
     const id = l.publicKey.slice(0, 12)
     if (!this.nodeById.has(id)) {
       const kind = ({ 2: 'repeater', 3: 'room', 4: 'sensor' } as const)[l.type] ?? 'chat'
-      this.nodes.push({ id, longName: l.name, shortName: initials(l.name), kind, publicKey: l.publicKey })
+      const position = l.lat !== undefined && l.lon !== undefined ? { lat: l.lat, lon: l.lon } : undefined
+      this.nodes.push({ id, longName: l.name, shortName: initials(l.name), kind, publicKey: l.publicKey, position })
     }
     return id
   }

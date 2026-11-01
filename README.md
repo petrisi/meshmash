@@ -47,7 +47,7 @@ and may break.
 - Trace path and path discovery, with "use this path"; trace follows the found route
 - Room server posts with authors
 - Discover nearby nodes (both-way SNR)
-- Contact links (`meshcore://contact/add`), auto-add settings, adding heard-but-unsaved nodes
+- Contact links: `meshcore://contact/add` and signed advert links (`meshcore://<hex>`); auto-add settings, adding heard-but-unsaved nodes
 - Share contact (zero-hop re-send of a stored advert) for all contact types
 - Radio clock set on connect
 

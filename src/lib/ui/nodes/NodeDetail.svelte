@@ -34,10 +34,19 @@
   )
   let copied = $state(false)
   const LINK_TYPE: Partial<Record<string, number>> = { chat: 1, repeater: 2, room: 3, sensor: 4 }
+  // The radio's stored advert (signed, with location) where it has one; else a contact card.
   async function copyLink() {
-    await navigator.clipboard.writeText(
-      contactLink({ name: node.longName, publicKey: node.publicKey!, type: LINK_TYPE[node.kind] ?? 1 }),
-    )
+    const n = node
+    const text = app
+      .exportContact(n.id)
+      .catch(() => null)
+      .then((advert) => advert ?? contactLink({ name: n.longName, publicKey: n.publicKey!, type: LINK_TYPE[n.kind] ?? 1 }))
+    // Written at the click with the text to follow: the radio may take a moment to answer.
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })])
+    } catch {
+      await navigator.clipboard.writeText(await text)
+    }
     copied = true
     setTimeout(() => (copied = false), 1500)
   }
@@ -69,7 +78,7 @@
       <div class="mono muted">
         {node.id}{isSelf ? ' · this radio' : ''}{node.unsaved ? ' · not saved' : ''}
         {#if proto === 'meshcore' && node.publicKey}
-          <button class="ghost link" title="Copy a meshcore://contact/add link for sharing" onclick={copyLink}>{copied ? 'copied' : 'copy link'}</button>
+          <button class="ghost link" title="Copy a meshcore:// contact link" onclick={copyLink}>{copied ? 'copied' : 'copy link'}</button>
         {/if}
       </div>
     </div>
