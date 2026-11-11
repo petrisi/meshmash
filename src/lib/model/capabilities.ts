@@ -90,7 +90,19 @@ export function radioActions(protocol: Protocol): NodeAction[] {
       ]
 }
 
+/**
+ * Meshtastic actions for a node missing from the radio's NodeDB: only those the firmware sends
+ * without the node's public key. Favorite/ignore/remove are no-ops there for unknown nodes.
+ */
+const MT_NOT_IN_DB: NodeAction[] = [
+  { id: 'exchange-info', label: 'Exchange user info', primary: true },
+  { id: 'traceroute', label: 'Traceroute' },
+  { id: 'req-position', label: 'Request position' },
+]
+export const NOT_IN_DB_ACTIONS = new Set(MT_NOT_IN_DB.map((a) => a.id))
+
 export function nodeActions(protocol: Protocol, node: MeshNode, isSelf: boolean): NodeAction[] {
+  if (node.notInDb) return protocol === 'meshtastic' ? MT_NOT_IN_DB : []
   if (node.unsaved) return [{ id: 'add-contact', label: 'Add contact', primary: true }]
   if (isSelf) return [...radioActions(protocol), { id: 'configure', label: 'Configure radio' }]
   if (protocol === 'meshtastic') return mtPeerActions(node)

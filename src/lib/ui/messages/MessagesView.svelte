@@ -8,7 +8,7 @@
   import ThreadList from './ThreadList.svelte'
 
   const thread = $derived(app.activeThread)
-  const peer = $derived(thread?.startsWith('dm:') ? app.nodeById.get(thread.slice(3)) : undefined)
+  const peer = $derived(thread?.startsWith('dm:') ? app.peerNode(thread.slice(3)) : undefined)
   const channel = $derived(
     thread?.startsWith('ch:') ? app.channels.find((c) => `ch:${c.index}` === thread) : undefined,
   )
@@ -57,7 +57,7 @@
     {:else if peer}
       <NodeDetail node={peer} compact />
       <div class="foot">
-        <button class="ghost" onclick={() => app.showNode(peer.id)}>Open in Nodes →</button>
+        {#if !peer.notInDb}<button class="ghost" onclick={() => app.showNode(peer.id)}>Open in Nodes →</button>{/if}
         <button class="ghost" onclick={() => app.pinDm(peer.id, !app.dmPins.includes(peer.id))}
           >{app.dmPins.includes(peer.id) ? 'Unpin conversation' : 'Pin conversation'}</button
         >

@@ -76,7 +76,7 @@
         {#if node.ignored}<span class="ign">IGNORED</span>{/if}
       </div>
       <div class="mono muted">
-        {node.id}{isSelf ? ' · this radio' : ''}{node.unsaved ? ' · not saved' : ''}
+        {node.notInDb ? "not in radio's node list" : node.id}{isSelf ? ' · this radio' : ''}{node.unsaved ? ' · not saved' : ''}
         {#if proto === 'meshcore' && node.publicKey}
           <button class="ghost link" title="Copy a meshcore:// contact link" onclick={copyLink}>{copied ? 'copied' : 'copy link'}</button>
         {/if}
@@ -116,6 +116,7 @@
 
   <RouteView nodeId={node.id} />
 
+  {#if !node.notInDb}
   <div class="section"><span>Node</span></div>
   <dl class="kv">
     <dt>Type</dt><dd>{KIND_LABEL[node.kind]}</dd>
@@ -174,6 +175,7 @@
     {/if}
   </dl>
   {#if mapPoints.length && app.view !== 'map'}<MiniMap points={mapPoints} />{/if}
+  {/if}
 </div>
 
 <style>

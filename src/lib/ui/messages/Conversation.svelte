@@ -25,7 +25,7 @@
 
   const msgs = $derived(app.byThread.get(thread) ?? [])
   const isDm = $derived(thread.startsWith('dm:'))
-  const peer = $derived(isDm ? app.nodeById.get(thread.slice(3)) : undefined)
+  const peer = $derived(isDm ? app.peerNode(thread.slice(3)) : undefined)
   const channel = $derived(isDm ? undefined : app.channels.find((c) => `ch:${c.index}` === thread))
   const title = $derived(peer?.longName ?? channel?.name ?? thread)
   const isMt = $derived(app.protocol === 'meshtastic')
@@ -181,7 +181,7 @@
     {#if peer}
       <Badge id={peer.id} label={peer.shortName} />
       <b>{title}</b>
-      <span class="mono faint">{peer.id}</span>
+      {#if !peer.notInDb}<span class="mono faint">{peer.id}</span>{/if}
     {:else}
       <span class="hash mono">{channel?.index}</span>
       <b>{title}</b>

@@ -65,6 +65,8 @@ export interface MeshNode {
   viaMqtt?: boolean
   /** MeshCore: heard, but not in the radio's contacts (manual add mode or table full). */
   unsaved?: boolean
+  /** Placeholder for a DM peer missing from the radio's node list (e.g. after a NodeDB reset). */
+  notInDb?: boolean
 }
 
 export type ChannelKind = 'primary' | 'secondary' | 'public' | 'hashtag' | 'private'

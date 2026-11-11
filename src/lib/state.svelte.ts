@@ -1,4 +1,4 @@
-import { capabilitiesFor, REPEAT_WINDOW_MS } from './model/capabilities'
+import { capabilitiesFor, NOT_IN_DB_ACTIONS, REPEAT_WINDOW_MS } from './model/capabilities'
 import { channelReplaced } from './model/channels'
 import type {
   ActionResult,
@@ -957,8 +957,21 @@ class AppState {
     )
   }
 
+  /** The node, or a placeholder when the radio's node list lacks it (DM peers after a reset). */
+  peerNode(nodeId: string): MeshNode {
+    return (
+      this.nodeById.get(nodeId) ?? {
+        id: nodeId,
+        longName: nodeId,
+        shortName: nodeId.replace(/^!/, '').slice(-4),
+        kind: this.protocol === 'meshcore' ? 'chat' : 'client',
+        notInDb: true,
+      }
+    )
+  }
+
   runAction(action: string, nodeId: string) {
-    const node = this.nodeById.get(nodeId)
+    const node = this.nodeById.get(nodeId) ?? (NOT_IN_DB_ACTIONS.has(action) ? this.peerNode(nodeId) : undefined)
     if (!node) return
     if (action === 'dm') return this.openDm(nodeId)
     if (this.#client) {
