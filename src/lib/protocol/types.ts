@@ -12,6 +12,7 @@ import type {
   ThreadKey,
   TracerouteResult,
 } from '../model/types'
+import type { PacketRecord } from '../model/analytics'
 
 export type LogDir = 'rx' | 'tx' | 'text' | 'info' | 'error'
 
@@ -43,6 +44,8 @@ export interface RadioSink {
   /** Answer (or definite failure) for a request started by RadioClient.action. */
   actionResult(nodeId: string, action: string, ok: boolean, text?: string): void
   log(e: Omit<LogEntry, 'ts'>): void
+  /** A packet received or sent, for Analytics. */
+  packet?(r: PacketRecord): void
   /** Initial download complete; UI can show the radio. */
   ready(): void
   closed(reason?: string): void

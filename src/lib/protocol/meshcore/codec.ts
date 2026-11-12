@@ -394,6 +394,30 @@ export function decodeRxLog(f: Uint8Array) {
 }
 
 /**
+ * Splits a raw over-the-air packet (Packet::readFrom): route and payload type, the path
+ * (hop count and hash size) and the payload. Null when malformed.
+ */
+export function splitPacket(raw: Uint8Array) {
+  if (raw.length < 2) return null
+  const header = raw[0]
+  const routeType = header & 0x03
+  let i = 1 + (routeType === 0 || routeType === 3 ? 4 : 0) // transport codes
+  if (i >= raw.length) return null
+  const pathLen = raw[i++]
+  const hashSize = (pathLen >> 6) + 1
+  const hops = pathLen & 63
+  if (hashSize === 4 || i + hops * hashSize > raw.length) return null
+  return {
+    routeType,
+    payloadType: (header >> 2) & 0x0f,
+    /** Flood routes: hops taken so far. Direct routes: hops still to go. */
+    hops,
+    pathLen,
+    payload: raw.subarray(i + hops * hashSize),
+  }
+}
+
+/**
  * Ciphertext of a GRP_TXT the radio sends for us: AES-128-ECB over
  * [ts u32][txt type 0]["<name>: <text>"], zero-padded. Used to recognise
  * repeats of our own channel messages in LOG_RX_DATA.

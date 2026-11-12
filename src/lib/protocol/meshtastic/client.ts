@@ -1,5 +1,6 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
+import { mtPacketType } from '../../model/analytics'
 import { sameBytes } from '../../model/channels'
 import type { Channel, ChannelConfig, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import { hex, utf8Decode, utf8Encode } from '../bytes'
@@ -118,6 +119,8 @@ export class MeshtasticClient implements RadioClient {
   private adminWaits = new Map<number, (payload: Uint8Array) => void>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private ready = false
+  /** When this connection began; packets received earlier were held by the radio. */
+  private connectedAt = Date.now()
   /** Packets are written one at a time, each after the radio took the previous one. */
   private txChain: Promise<unknown> = Promise.resolve()
   private accepting = new Map<number, () => void>()
@@ -380,6 +383,19 @@ export class MeshtasticClient implements RadioClient {
         if (newer) known.lastHeard = rxAt / 1000
         this.sink.node(patch)
       }
+      this.sink.packet?.({
+        ts: rxAt,
+        dir: 'rx',
+        from: fromId,
+        type: mtPacketType(p.decoded?.portnum),
+        channel: p.channel,
+        hops,
+        snr: p.rxSnr || undefined,
+        rssi: p.rxRssi || undefined,
+        mqtt: p.viaMqtt || undefined,
+        name: p.decoded?.portnum === Port.NODEINFO ? userName(p.decoded.payload) : undefined,
+        queued: rxAt < this.connectedAt - QUEUED_MS || undefined,
+      })
     }
 
     const d = p.decoded
@@ -538,6 +554,10 @@ export class MeshtasticClient implements RadioClient {
         await new Promise((r) => setTimeout(r, wait))
       }
       await this.writePacket(id, to, portnum, payload, opts)
+      // Admin to our own radio does not go over the air.
+      if (to !== this.myNum) {
+        this.sink.packet?.({ ts: Date.now(), dir: 'tx', from: nodeId(this.myNum), type: mtPacketType(portnum), channel: opts.channel })
+      }
     })
     this.txChain = written
       .then(
@@ -748,6 +768,20 @@ export class MeshtasticClient implements RadioClient {
 }
 
 const round1 = (x: number) => Math.round(x * 10) / 10
+
+/**
+ * A packet received this long before the connection began was held by the radio while no
+ * app was connected. The margin absorbs a slightly wrong radio clock.
+ */
+const QUEUED_MS = 30_000
+
+function userName(payload: Uint8Array): string | undefined {
+  try {
+    return decodeUser(payload).longName || undefined
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Our User exactly as the radio reported it. The firmware stores a NODEINFO we send as its own

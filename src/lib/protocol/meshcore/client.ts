@@ -1,5 +1,6 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
+import { mcPacketType, RepeatFilter } from '../../model/analytics'
 import { sameBytes } from '../../model/channels'
 import type { Channel, ChannelConfig, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { Transport } from '../../transport/types'
@@ -65,6 +66,7 @@ import {
   encodePath,
   decodePathDiscovery,
   decodeRxLog,
+  splitPacket,
   decodeSelfInfo,
   decodeSent,
   cmdUpdateContact,
@@ -96,6 +98,27 @@ const KIND: Record<number, NodeKind> = {
 
 /** Node ids are the first 6 bytes of the public key, as used in message frames. */
 const idOf = (pk: Uint8Array) => hex(pk.subarray(0, 6))
+
+// Over-the-air payload types used below.
+const ADVERT = 4
+const ANON_REQ = 7
+const TRACE = 9
+const CONTROL = 11
+
+/** Commands that put a packet on the air, with their Analytics type. */
+const TX_TYPES: Partial<Record<number, string>> = {
+  [Cmd.SEND_TXT_MSG]: 'dm',
+  [Cmd.SEND_CHANNEL_TXT_MSG]: 'channel',
+  [Cmd.SEND_SELF_ADVERT]: 'advert',
+  [Cmd.SHARE_CONTACT]: 'advert',
+  [Cmd.SEND_LOGIN]: 'request',
+  [Cmd.SEND_STATUS_REQ]: 'request',
+  [Cmd.SEND_TELEMETRY_REQ]: 'request',
+  [Cmd.SEND_BINARY_REQ]: 'request',
+  [Cmd.SEND_PATH_DISCOVERY_REQ]: 'request',
+  [Cmd.SEND_TRACE_PATH]: 'trace',
+  [Cmd.SEND_CONTROL_DATA]: 'other',
+}
 
 /** Handles response frames for one command; returns true when the response is complete. */
 type Collector = (frame: Uint8Array) => boolean
@@ -163,6 +186,7 @@ export class MeshCoreClient implements RadioClient {
   private remoteWait: { codes: number[]; match: (f: Uint8Array) => boolean; done: (f: Uint8Array) => void } | null = null
   /** Our recent channel messages, matched against overheard repeats. */
   private echoes: { ct: Uint8Array; localId: string; count: number }[] = []
+  private repeats = new RepeatFilter()
 
   constructor(
     private t: Transport,
@@ -241,7 +265,49 @@ export class MeshCoreClient implements RadioClient {
       })
     const p = this.chain.then(run, run)
     this.chain = p.catch(() => {})
+    const type = TX_TYPES[payload[0]]
+    if (type) {
+      p.then(
+        () => this.sink.packet?.({ ts: Date.now(), dir: 'tx', from: this.self ? idOf(this.self.publicKey) : undefined, type }),
+        () => {},
+      )
+    }
     return p
+  }
+
+  /** Analytics record for a packet heard over the air; `own` for repeats of our own. */
+  private recordRx(r: ReturnType<typeof decodeRxLog>, own: boolean) {
+    const pk = splitPacket(r.raw)
+    if (!pk) return
+    const now = Date.now()
+    const key = `${pk.payloadType}:${pk.payloadType === TRACE ? `${pk.pathLen}:` : ''}${hex(pk.payload)}`
+    const dup = this.repeats.repeat(key, now)
+    if (own) return
+    let from: string | undefined
+    let name: string | undefined
+    if (pk.payloadType === ADVERT) {
+      const a = decodeAdvertPacket(r.raw)
+      if (a) {
+        from = a.publicKey.slice(0, 12)
+        name = a.name
+      }
+    } else if (pk.payloadType === ANON_REQ && pk.payload.length >= 33) {
+      from = hex(pk.payload.subarray(1, 7)) // [dest hash][sender public key]...
+    } else if (pk.payloadType === CONTROL && (pk.payload[0] & 0xf0) === 0x90 && pk.payload.length >= 12) {
+      from = hex(pk.payload.subarray(6, 12)) // discover reply: [type][snr][tag u32][public key or its first 8 bytes]
+    }
+    if (from && this.self && from === idOf(this.self.publicKey)) return
+    this.sink.packet?.({
+      ts: now,
+      dir: 'rx',
+      from,
+      type: mcPacketType(pk.payloadType),
+      hops: pk.routeType === 0 || pk.routeType === 1 ? pk.hops : undefined,
+      snr: r.snr,
+      rssi: r.rssi,
+      name,
+      dup: dup || undefined,
+    })
   }
 
   /** Request whose single response frame must have the given code. */
@@ -330,7 +396,7 @@ export class MeshCoreClient implements RadioClient {
     this.sink.channels(channels)
     this.ready = true
     this.sink.ready()
-    void this.syncMessages()
+    void this.syncMessages(true)
   }
 
   private async loadContacts() {
@@ -545,12 +611,16 @@ export class MeshCoreClient implements RadioClient {
       }
       case Push.LOG_RX_DATA: {
         const r = decodeRxLog(f)
-        if (r.payloadType !== PayloadType.GRP_TXT) return
-        for (const e of this.echoes) {
-          if (!endsWith(r.raw, e.ct)) continue
-          e.count++
-          this.sink.updateMessage(e.localId, { repeats: e.count })
+        let own = false
+        if (r.payloadType === PayloadType.GRP_TXT) {
+          for (const e of this.echoes) {
+            if (!endsWith(r.raw, e.ct)) continue
+            own = true
+            e.count++
+            this.sink.updateMessage(e.localId, { repeats: e.count })
+          }
         }
+        this.recordRx(r, own)
         return
       }
       case Push.PATH_DISCOVERY_RESPONSE:
@@ -603,7 +673,11 @@ export class MeshCoreClient implements RadioClient {
   }
 
   /** Drains the radio's offline message queue. */
-  private async syncMessages() {
+  /**
+   * Drains the radio's message queue. `initial`: the drain at connect, which holds messages
+   * received while no app was connected; later ones were already recorded as raw packets.
+   */
+  private async syncMessages(initial = false) {
     if (this.syncing) return
     this.syncing = true
     try {
@@ -626,7 +700,7 @@ export class MeshCoreClient implements RadioClient {
         }
         misses = 0
         if (!frame || frame[0] === Resp.NO_MORE_MESSAGES) break
-        this.onMessageFrame(frame)
+        this.onMessageFrame(frame, initial)
       }
     } catch (e) {
       this.sink.log({ dir: 'error', kind: 'sync', summary: String(e) })
@@ -635,7 +709,7 @@ export class MeshCoreClient implements RadioClient {
     }
   }
 
-  private onMessageFrame(f: Uint8Array) {
+  private onMessageFrame(f: Uint8Array, queued = false) {
     const isChannel = f[0] === Resp.CHANNEL_MSG_RECV_V3 || f[0] === Resp.CHANNEL_MSG_RECV
     const isDm = f[0] === Resp.CONTACT_MSG_RECV_V3 || f[0] === Resp.CONTACT_MSG_RECV
     if (!isChannel && !isDm) return
@@ -650,12 +724,17 @@ export class MeshCoreClient implements RadioClient {
     // 0xFF here means the message came by a direct route, so the hop count is not known.
     const hops = pathHops(m.pathLen)
 
+    const record = (from: string | undefined) =>
+      queued &&
+      this.sink.packet?.({ ts, dir: 'rx', from, type: isChannel ? 'channel' : 'dm', channel: m.channel, hops, snr: m.snr, queued: true })
+
     if (isChannel) {
       const sep = m.text.indexOf(': ')
       const name = sep > 0 ? m.text.slice(0, sep) : ''
       const text = sep > 0 ? m.text.slice(sep + 2) : m.text
       const contact = name ? [...this.contacts.values()].find((c) => c.name === name) : undefined
       const from = contact ? idOf(contact.publicKey) : `name:${name || '?'}`
+      record(contact ? from : undefined)
       if (contact) this.sink.heard(from, now, m.channel)
       this.sink.message({
         id: `mc-ch${m.channel}-${m.senderTs}-${name}`,
@@ -673,6 +752,8 @@ export class MeshCoreClient implements RadioClient {
       this.sink.heard(from, now)
       // A room server relays posts from its members: the thread is the room, the sender the author.
       const author = m.author ? this.byKeyPrefix(m.author) : undefined
+      // A room post's sender is its author; an unknown author has only a 4-byte prefix.
+      record(m.author ? (author ? idOf(author.publicKey) : undefined) : from)
       this.sink.message({
         id: `mc-dm-${from}-${m.senderTs}${m.author ? `-${m.author}` : ''}`,
         thread: `dm:${from}`,

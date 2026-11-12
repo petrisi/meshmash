@@ -39,6 +39,7 @@ export function sanitizeSink(s: RadioSink): RadioSink {
     updateMessage: (id, p) => s.updateMessage(id, cleanMessage(p)),
     remote: (id, p) => s.remote(id, cleanRemote(p)),
     cliLine: (id, dir, text) => s.cliLine(id, dir, cleanText(text, true)),
+    packet: s.packet && ((r) => s.packet!(clean(r, ['name']))),
   }
 }
 

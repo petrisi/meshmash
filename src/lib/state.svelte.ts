@@ -30,6 +30,7 @@ import type { LogEntry, Probe, RadioClient, RadioSink, SendOptions } from './pro
 import { redactCli, sanitizeSink } from './sanitize'
 import { deleteMessages, loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
 import { loadDmList, saveDmList } from './store/dmList'
+import { PacketRecorder } from './store/packets'
 import { saveHopLimit } from './store/hopLimits'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
@@ -104,6 +105,8 @@ class AppState {
   /** Telemetry history per node, oldest first. */
   samples = $state<Record<string, Sample[]>>({})
   #saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Analytics records of the connected radio. */
+  #packets = new PacketRecorder()
   /**
    * Per channel: node id → last time heard on that channel. Meshtastic counts any packet
    * (every packet carries a channel); MeshCore only channel messages.
@@ -501,9 +504,11 @@ class AppState {
         this.#saveNode(nodeId)
       },
       log: (e) => this.#log(e),
+      packet: (r) => this.#packets.add(r),
       ready: async () => {
         // Wrong radio on a reconnect attempt: connectSerial disconnects it; never show it.
         if (this.#expectNodeId && this.session?.info.nodeId !== this.#expectNodeId) return
+        this.#packets.start(radioKey())
         const history = await loadMessages(radioKey()).catch(() => [] as Message[])
         const saved = await loadNodeData(radioKey()).catch(() => ({}))
         for (const [id, d] of Object.entries(saved)) {
@@ -562,6 +567,7 @@ class AppState {
     const t = this.#transport
     this.#client = null
     this.#transport = null
+    void this.#packets.stop()
     this.#reset()
     await c?.close().catch(() => {})
     await t?.close().catch(() => {})
