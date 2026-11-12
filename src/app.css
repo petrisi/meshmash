@@ -17,6 +17,9 @@
   --poor: #ef6b6b;
   --danger: #ef6b6b;
   --own: rgba(201, 206, 212, 0.06);
+  /* Analytics series: received, sent. Checked for colour-vision deficiency on all three themes. */
+  --rx: #3987e5;
+  --tx: #d95926;
 }
 
 /* Meshtastic-style: green on charcoal. */

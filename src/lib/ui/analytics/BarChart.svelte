@@ -25,6 +25,9 @@
     now = Date.now(),
     format = (v: number) => String(Math.round(v)),
     dim,
+    height = 300,
+    showRx = true,
+    showTx = true,
   }: {
     buckets: ChartBucket[]
     /** Axis label under bucket i, or null. */
@@ -38,13 +41,17 @@
     format?: (v: number) => string
     /** Buckets drawn faded, e.g. too little data behind them. */
     dim?: (b: ChartBucket) => boolean
+    height?: number
+    /** Series in the legend and tooltip; one alone needs no legend swatch. */
+    showRx?: boolean
+    showTx?: boolean
   } = $props()
 
-  const H = 300
+  const H = $derived(height)
   const PAD = { l: 44, r: 8, t: 10, b: 22 }
   let width = $state(600)
   const plotW = $derived(Math.max(50, width - PAD.l - PAD.r))
-  const plotH = H - PAD.t - PAD.b
+  const plotH = $derived(H - PAD.t - PAD.b)
 
   const scale = $derived(niceScale(Math.max(0, ...buckets.map((b) => b.rx + b.tx))))
   const ticks = $derived(Array.from({ length: Math.round(scale.top / scale.step) + 1 }, (_, i) => i * scale.step))
@@ -88,8 +95,10 @@
 
 <div class="chart" bind:clientWidth={width}>
   <div class="legend">
-    <span><i class="sw rx"></i>{rxLabel}</span>
-    <span><i class="sw tx"></i>{txLabel}</span>
+    {#if showRx && showTx}
+      <span><i class="sw rx"></i>{rxLabel}</span>
+      <span><i class="sw tx"></i>{txLabel}</span>
+    {/if}
     {#if bars.some((b) => b.uncovered)}<span><i class="sw off"></i>Not connected</span>{/if}
     <span class="ylab">y: {yLabel}</span>
   </div>
@@ -133,8 +142,8 @@
   {#if hb}
     <div class="tip" style:left="{tipLeft}px">
       <div class="th">{title(hb)}</div>
-      <div><i class="sw rx"></i>{rxLabel} <b>{format(hb.rx)}</b></div>
-      <div><i class="sw tx"></i>{txLabel} <b>{format(hb.tx)}</b></div>
+      {#if showRx}<div><i class="sw rx"></i>{rxLabel} <b>{format(hb.rx)}</b></div>{/if}
+      {#if showTx}<div><i class="sw tx"></i>{txLabel} <b>{format(hb.tx)}</b></div>{/if}
       {#if hb.coveredMs !== undefined}<div class="faint">Connected {mins(hb.coveredMs)}</div>{/if}
       {#if hb.note}<div class="faint">{hb.note}</div>{/if}
     </div>
@@ -144,8 +153,6 @@
 <style>
   .chart {
     position: relative;
-    --rx: #3987e5;
-    --tx: #d95926;
   }
   svg {
     display: block;

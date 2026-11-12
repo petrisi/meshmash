@@ -2,13 +2,15 @@
   import { type ActivityRange, PACKET_TYPES, type RecordFilter } from '../../model/analytics'
   import { app } from '../../state.svelte'
   import ActivityView from './ActivityView.svelte'
+  import ByNodeView from './ByNodeView.svelte'
   import TimeOfDayView from './TimeOfDayView.svelte'
   import TypeFilter from './TypeFilter.svelte'
 
-  type Tab = 'activity' | 'time'
+  type Tab = 'activity' | 'time' | 'nodes'
   const TABS: { id: Tab; label: string }[] = [
     { id: 'activity', label: 'Activity' },
     { id: 'time', label: 'Time of day' },
+    { id: 'nodes', label: 'By node' },
   ]
 
   let tab = $state<Tab>('activity')
@@ -69,6 +71,8 @@
       <ActivityView records={data.records} coverage={data.coverage} {filter} bind:range bind:counts />
     {:else if tab === 'time'}
       <TimeOfDayView records={data.records} coverage={data.coverage} {filter} bind:counts />
+    {:else}
+      <ByNodeView records={data.records} coverage={data.coverage} {filter} bind:counts />
     {/if}
   {/if}
 </div>

@@ -1,6 +1,6 @@
 // Activity chart buckets: edges in local time, counts by direction, filters, coverage.
 import { describe, expect, it } from 'vitest'
-import { activity, bucketEdges, coveredMs, niceScale, type PacketRecord, timeOfDay } from '../src/lib/model/analytics'
+import { activity, bucketEdges, coveredMs, niceScale, type PacketRecord, timeOfDay, byNode } from '../src/lib/model/analytics'
 
 const H = 3_600_000
 const NOW = new Date(2026, 10, 12, 14, 25).getTime()
@@ -90,5 +90,29 @@ describe('timeOfDay', () => {
   it('weekdays and weekends', () => {
     expect(timeOfDay(recs, spans, all, 'weekdays')[9]).toMatchObject({ rx: 1, tx: 1, coveredMs: H, days: 1 })
     expect(timeOfDay(recs, spans, all, 'weekends')[9]).toMatchObject({ rx: 1, tx: 0, coveredMs: 30 * 60_000, days: 1 })
+  })
+})
+
+describe('byNode', () => {
+  const recs: PacketRecord[] = [
+    { ts: 100, dir: 'rx', from: '!a', type: 'text' },
+    { ts: 200, dir: 'rx', from: '!a', type: 'nodeinfo', name: 'Old name' },
+    { ts: 300, dir: 'rx', from: '!a', type: 'nodeinfo', name: 'New name' },
+    { ts: 150, dir: 'rx', from: '!b', type: 'position' },
+    { ts: 160, dir: 'rx', type: 'ack' },
+    { ts: 170, dir: 'rx', from: '!b', type: 'position', dup: true },
+    { ts: 180, dir: 'tx', from: '!me', type: 'text' },
+    { ts: 10, dir: 'rx', from: '!c', type: 'text' }, // before the period
+  ]
+  it('ranks senders; unknown senders and own sends kept apart', () => {
+    const b = byNode(recs, all, 50, '!me')
+    expect(b.nodes.map((n) => [n.id, n.count])).toEqual([['!a', 3], ['!b', 1]])
+    expect(b.nodes[0]).toMatchObject({ byType: { text: 1, nodeinfo: 2 }, last: 300, names: ['New name', 'Old name'] })
+    expect(b).toMatchObject({ unknown: 1, received: 5, sent: { id: '!me', count: 1, byType: { text: 1 } } })
+  })
+  it('follows the type filter', () => {
+    const b = byNode(recs, { types: new Set(['position']), repeats: true }, 50, '!me')
+    expect(b.nodes.map((n) => [n.id, n.count])).toEqual([['!b', 2]])
+    expect(b.sent).toBeNull()
   })
 })

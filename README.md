@@ -27,6 +27,7 @@ and may break.
 - Map: OpenStreetMap tiles, node markers by type and last heard, direct links, traceroute and neighbour links of the selected node
 - Distances from coarse positions marked `~`; selected node's position uncertainty drawn on the map
 - Reconnects automatically after a USB drop or page reload
+- Analytics: packets received and sent over 24 h, 7 days or 30 days; time of day (totals or per connected hour); packets by node and type. Recorded locally while connected, kept 31 days
 - Raw protocol log
 - Message history and node data stored per radio in IndexedDB
 

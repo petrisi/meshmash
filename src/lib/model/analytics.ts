@@ -247,3 +247,58 @@ export function timeOfDay(recs: PacketRecord[], spans: CoverageSpan[], f: Record
   days.forEach((d, i) => (out[i].days = d.size))
   return out
 }
+
+// By node: packets per sender.
+
+export const BY_NODE_DAYS = 30
+
+export interface NodeTotals {
+  id: string
+  count: number
+  byType: Record<string, number>
+  last: number
+  /** Names seen in this node's node info or advert packets, latest first. */
+  names: string[]
+}
+
+export interface ByNode {
+  /** Received packets per known sender, most first. */
+  nodes: NodeTotals[]
+  /** Received packets whose sender is not known. */
+  unknown: number
+  /** Packets this radio sent. */
+  sent: NodeTotals | null
+  received: number
+}
+
+export function byNode(recs: PacketRecord[], f: RecordFilter, since: number, selfId: string): ByNode {
+  const map = new Map<string, NodeTotals & { nameTs: Map<string, number> }>()
+  let unknown = 0
+  let received = 0
+  let sent: NodeTotals | null = null
+  for (const r of recs) {
+    if (r.ts < since || !keepRecord(r, f)) continue
+    if (r.dir === 'tx') {
+      sent ??= { id: selfId, count: 0, byType: {}, last: 0, names: [] }
+      sent.count++
+      sent.byType[r.type] = (sent.byType[r.type] ?? 0) + 1
+      sent.last = Math.max(sent.last, r.ts)
+      continue
+    }
+    received++
+    if (!r.from) {
+      unknown++
+      continue
+    }
+    let n = map.get(r.from)
+    if (!n) map.set(r.from, (n = { id: r.from, count: 0, byType: {}, last: 0, names: [], nameTs: new Map() }))
+    n.count++
+    n.byType[r.type] = (n.byType[r.type] ?? 0) + 1
+    n.last = Math.max(n.last, r.ts)
+    if (r.name) n.nameTs.set(r.name, Math.max(n.nameTs.get(r.name) ?? 0, r.ts))
+  }
+  const nodes = [...map.values()]
+    .map(({ nameTs, ...n }) => ({ ...n, names: [...nameTs].sort((a, b) => b[1] - a[1]).map(([name]) => name) }))
+    .sort((a, b) => b.count - a.count || b.last - a.last)
+  return { nodes, unknown, sent, received }
+}
