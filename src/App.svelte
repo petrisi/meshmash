@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from './lib/state.svelte'
+  import AnalyticsView from './lib/ui/analytics/AnalyticsView.svelte'
   import ConnectScreen from './lib/ui/ConnectScreen.svelte'
   import LogView from './lib/ui/LogView.svelte'
   import MapView from './lib/ui/map/MapView.svelte'
@@ -20,7 +21,7 @@
     <div class="body">
       <NavRail />
       <main>
-        {#if app.view === 'messages'}<MessagesView />{:else if app.view === 'nodes'}<NodesView />{:else if app.view === 'map'}<MapView />{:else}<LogView />{/if}
+        {#if app.view === 'messages'}<MessagesView />{:else if app.view === 'nodes'}<NodesView />{:else if app.view === 'map'}<MapView />{:else if app.view === 'analytics'}<AnalyticsView />{:else}<LogView />{/if}
       </main>
     </div>
     <StatusBar />

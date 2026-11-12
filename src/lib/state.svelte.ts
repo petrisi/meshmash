@@ -1,4 +1,5 @@
 import { capabilitiesFor, NOT_IN_DB_ACTIONS, REPEAT_WINDOW_MS } from './model/capabilities'
+import { type CoverageSpan, type PacketRecord, RETENTION_MS } from './model/analytics'
 import { channelReplaced } from './model/channels'
 import type {
   ActionResult,
@@ -16,6 +17,7 @@ import type {
   ThreadKey,
   TracerouteResult,
 } from './model/types'
+import { demoAnalytics } from './mock/analytics'
 import { DemoRadio } from './mock/demo'
 import { mockSession } from './mock/mock'
 import { canResend } from './model/delivery'
@@ -28,7 +30,7 @@ import { MeshCoreClient } from './protocol/meshcore/client'
 import { MeshtasticClient } from './protocol/meshtastic/client'
 import type { LogEntry, Probe, RadioClient, RadioSink, SendOptions } from './protocol/types'
 import { redactCli, sanitizeSink } from './sanitize'
-import { deleteMessages, loadMessages, loadNodeData, saveMessage, saveNodeData } from './store/db'
+import { deleteMessages, deletePackets, loadCoverage, loadMessages, loadNodeData, loadPackets, saveMessage, saveNodeData } from './store/db'
 import { loadDmList, saveDmList } from './store/dmList'
 import { PacketRecorder } from './store/packets'
 import { saveHopLimit } from './store/hopLimits'
@@ -38,7 +40,7 @@ import { rememberPortName } from './transport/portNames'
 import { SerialTransport } from './transport/serial'
 import type { Transport } from './transport/types'
 
-export type View = 'messages' | 'nodes' | 'map' | 'log'
+export type View = 'messages' | 'nodes' | 'map' | 'analytics' | 'log'
 
 const viaOf = (t: Transport) => (t instanceof SerialTransport ? 'usb' : 'bridge')
 /** Web Lock held by the tab connected to a radio; all tabs of the site see it. */
@@ -107,6 +109,10 @@ class AppState {
   #saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** Analytics records of the connected radio. */
   #packets = new PacketRecorder()
+  /** Analytics history of this radio, loaded when the Analytics view opens; then kept current. */
+  analytics = $state.raw<{ records: PacketRecord[]; coverage: CoverageSpan[] } | null>(null)
+  #analyticsTimer: ReturnType<typeof setInterval> | null = null
+  #analyticsDirty = false
   /**
    * Per channel: node id → last time heard on that channel. Meshtastic counts any packet
    * (every packet carries a channel); MeshCore only channel messages.
@@ -504,7 +510,13 @@ class AppState {
         this.#saveNode(nodeId)
       },
       log: (e) => this.#log(e),
-      packet: (r) => this.#packets.add(r),
+      packet: (r) => {
+        this.#packets.add(r)
+        if (this.analytics) {
+          this.analytics.records.push(r)
+          this.#analyticsDirty = true
+        }
+      },
       ready: async () => {
         // Wrong radio on a reconnect attempt: connectSerial disconnects it; never show it.
         if (this.#expectNodeId && this.session?.info.nodeId !== this.#expectNodeId) return
@@ -575,6 +587,7 @@ class AppState {
 
   #reset() {
     this.#stopTimers()
+    this.#stopAnalytics()
     this.#demo = null
     this.session = null
     this.nodes = []
@@ -974,6 +987,53 @@ class AppState {
         notInDb: true,
       }
     )
+  }
+
+  /** Loads the radio's Analytics history (demo: generated), then refreshes it every 5 s. */
+  async loadAnalytics() {
+    if (this.analytics) return
+    if (this.isDemo) {
+      if (!this.session) return
+      this.analytics = demoAnalytics(this.protocol!, this.nodes, this.selfId, Date.now())
+      return
+    }
+    const radio = this.session?.info.nodeId
+    if (!radio) return
+    await this.#packets.flush()
+    const since = Date.now() - RETENTION_MS
+    const [records, coverage] = await Promise.all([
+      loadPackets(radio, since).catch(() => [] as PacketRecord[]),
+      loadCoverage(radio, since).catch(() => [] as CoverageSpan[]),
+    ])
+    if (this.session?.info.nodeId !== radio || this.analytics) return
+    this.analytics = { records, coverage: this.#withLiveSpan(coverage) }
+    this.#analyticsTimer = setInterval(() => {
+      const a = this.analytics
+      if (!a) return
+      // Coverage grows every tick; records only when new ones came.
+      this.analytics = { records: this.#analyticsDirty ? [...a.records] : a.records, coverage: this.#withLiveSpan(a.coverage) }
+      this.#analyticsDirty = false
+    }, 5000)
+  }
+
+  /** Stored spans with the current connection's span brought up to now. */
+  #withLiveSpan(spans: CoverageSpan[]): CoverageSpan[] {
+    const live = this.#packets.current
+    return live ? [...spans.filter((s) => s.start !== live.start), live] : spans
+  }
+
+  async clearAnalytics() {
+    const radio = this.session?.info.nodeId
+    if (!radio) return
+    if (!this.isDemo) await deletePackets(radio).catch(() => {})
+    this.analytics = { records: [], coverage: this.#withLiveSpan([]) }
+  }
+
+  #stopAnalytics() {
+    if (this.#analyticsTimer) clearInterval(this.#analyticsTimer)
+    this.#analyticsTimer = null
+    this.analytics = null
+    this.#analyticsDirty = false
   }
 
   runAction(action: string, nodeId: string) {

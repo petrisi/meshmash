@@ -114,3 +114,83 @@ export class RepeatFilter {
     return last !== undefined && now - last <= this.windowMs
   }
 }
+
+// Aggregation for the charts.
+
+export type ActivityRange = '24h' | '7d' | '30d'
+
+export interface Bucket {
+  start: number
+  end: number
+  rx: number
+  tx: number
+  /** Milliseconds of the bucket during which a radio was connected. */
+  coveredMs: number
+}
+
+export interface RecordFilter {
+  /** Type groups to keep; null keeps all. */
+  types: Set<string> | null
+  /** MeshCore: count repeats of a packet already counted. */
+  repeats: boolean
+}
+
+export const keepRecord = (r: PacketRecord, f: RecordFilter) => (f.repeats || !r.dup) && (!f.types || f.types.has(r.type))
+
+const HOUR = 3_600_000
+
+/**
+ * Bucket edges ending at the next local hour (24 h, 7 days: hourly buckets) or the next local
+ * midnight (30 days: daily buckets, 23 or 25 h long across a DST change).
+ */
+export function bucketEdges(range: ActivityRange, now: number): number[] {
+  const d = new Date(now)
+  if (range === '30d') {
+    d.setHours(0, 0, 0, 0)
+    return Array.from({ length: 31 }, (_, i) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 29 + i).getTime())
+  }
+  d.setMinutes(0, 0, 0)
+  const end = d.getTime() + HOUR
+  const n = range === '24h' ? 24 : 168
+  return Array.from({ length: n + 1 }, (_, i) => end - (n - i) * HOUR)
+}
+
+/** Overlap of the spans with [a, b). */
+export function coveredMs(spans: CoverageSpan[], a: number, b: number): number {
+  let ms = 0
+  for (const s of spans) ms += Math.max(0, Math.min(b, s.end) - Math.max(a, s.start))
+  return ms
+}
+
+/** Index of the bucket holding ts, or -1 outside. */
+function bucketOf(edges: number[], ts: number): number {
+  if (ts < edges[0] || ts >= edges[edges.length - 1]) return -1
+  let lo = 0
+  let hi = edges.length - 1
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (ts >= edges[mid]) lo = mid
+    else hi = mid
+  }
+  return lo
+}
+
+export function activity(recs: PacketRecord[], spans: CoverageSpan[], range: ActivityRange, now: number, f: RecordFilter): Bucket[] {
+  const edges = bucketEdges(range, now)
+  const out: Bucket[] = edges.slice(0, -1).map((start, i) => ({ start, end: edges[i + 1], rx: 0, tx: 0, coveredMs: coveredMs(spans, start, Math.min(edges[i + 1], now)) }))
+  for (const r of recs) {
+    if (!keepRecord(r, f)) continue
+    const i = bucketOf(edges, r.ts)
+    if (i >= 0) out[i][r.dir]++
+  }
+  return out
+}
+
+/** Round axis maximum and step for about four gridlines; whole numbers only. */
+export function niceScale(max: number): { top: number; step: number } {
+  if (max <= 0) return { top: 4, step: 1 }
+  const raw = max / 4
+  const mag = 10 ** Math.floor(Math.log10(raw))
+  const step = Math.max(1, [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw)!)
+  return { top: Math.ceil(max / step) * step, step }
+}

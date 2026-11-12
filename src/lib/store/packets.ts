@@ -33,6 +33,11 @@ export class PacketRecorder {
     private clock: () => number = Date.now,
   ) {}
 
+  /** The span of the current connection, up to now. */
+  get current(): CoverageSpan | null {
+    return this.span && { start: this.span.start, end: this.clock() }
+  }
+
   /** Records arriving before start (during the initial download) are kept for that radio. */
   add(r: PacketRecord) {
     this.buffer.push(r)
