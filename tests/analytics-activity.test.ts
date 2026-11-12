@@ -116,3 +116,22 @@ describe('byNode', () => {
     expect(b.sent).toBeNull()
   })
 })
+
+describe('byNode name-only senders', () => {
+  it('groups MeshCore channel texts by claimed name apart from node ids', () => {
+    const recs: PacketRecord[] = [
+      { ts: 100, dir: 'rx', type: 'channel', name: 'Hill' },
+      { ts: 110, dir: 'rx', type: 'channel', name: 'Hill' },
+      { ts: 120, dir: 'rx', type: 'channel', name: 'aabbccddeeff' }, // a name that looks like a node id
+      { ts: 130, dir: 'rx', from: 'aabbccddeeff', type: 'advert', name: 'Real' },
+      { ts: 140, dir: 'rx', type: 'channel' },
+    ]
+    const b = byNode(recs, all, 0, 'me')
+    expect(b.nodes.map((n) => [n.id, n.count, !!n.nameOnly])).toEqual([
+      ['name:Hill', 2, true],
+      ['aabbccddeeff', 1, false],
+      ['name:aabbccddeeff', 1, true],
+    ])
+    expect(b.unknown).toBe(1)
+  })
+})

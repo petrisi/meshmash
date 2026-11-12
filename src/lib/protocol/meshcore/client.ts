@@ -1,6 +1,7 @@
 import { initials } from '../../format'
 import { REPEAT_WINDOW_MS } from '../../model/capabilities'
-import { mcPacketType, RepeatFilter } from '../../model/analytics'
+import { mcPacketType, type PacketRecord, RepeatFilter } from '../../model/analytics'
+import { cleanText } from '../../sanitize'
 import { sameBytes } from '../../model/channels'
 import type { Channel, ChannelConfig, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { Transport } from '../../transport/types'
@@ -67,6 +68,8 @@ import {
   decodePathDiscovery,
   decodeRxLog,
   splitPacket,
+  decryptGroupText,
+  splitSenderName,
   decodeSelfInfo,
   decodeSent,
   cmdUpdateContact,
@@ -104,6 +107,7 @@ const ADVERT = 4
 const ANON_REQ = 7
 const TRACE = 9
 const CONTROL = 11
+const GRP_TXT = 5
 
 /** Commands that put a packet on the air, with their Analytics type. */
 const TX_TYPES: Partial<Record<number, string>> = {
@@ -187,6 +191,8 @@ export class MeshCoreClient implements RadioClient {
   /** Our recent channel messages, matched against overheard repeats. */
   private echoes: { ct: Uint8Array; localId: string; count: number }[] = []
   private repeats = new RepeatFilter()
+  /** Senders of recent channel texts, by packet key, so repeats are decrypted once. */
+  private groupSenders = new Map<string, Promise<Pick<PacketRecord, 'channel' | 'name' | 'from'>>>()
 
   constructor(
     private t: Transport,
@@ -297,7 +303,7 @@ export class MeshCoreClient implements RadioClient {
       from = hex(pk.payload.subarray(6, 12)) // discover reply: [type][snr][tag u32][public key or its first 8 bytes]
     }
     if (from && this.self && from === idOf(this.self.publicKey)) return
-    this.sink.packet?.({
+    const rec: PacketRecord = {
       ts: now,
       dir: 'rx',
       from,
@@ -307,7 +313,43 @@ export class MeshCoreClient implements RadioClient {
       rssi: r.rssi,
       name,
       dup: dup || undefined,
-    })
+    }
+    if (pk.payloadType !== GRP_TXT) return void this.sink.packet?.(rec)
+    // Channel text: the sender's name is inside, readable on our own channels. Repeats of the
+    // packet reuse the first copy's result.
+    let sender = this.groupSenders.get(key)
+    if (!sender) {
+      sender = this.groupSender(pk.payload).catch(() => ({}))
+      this.groupSenders.set(key, sender)
+      if (this.groupSenders.size > 500) this.groupSenders.delete(this.groupSenders.keys().next().value!)
+    }
+    void sender.then((s) => this.sink.packet?.({ ...rec, ...s }))
+  }
+
+  /** Channel and claimed sender name of a channel text heard over the air, where one of our keys opens it. */
+  private async groupSender(payload: Uint8Array): Promise<Pick<PacketRecord, 'channel' | 'name' | 'from'>> {
+    for (const [channel, secret] of this.secrets) {
+      const m = await decryptGroupText(secret, payload)
+      if (!m) continue
+      if (m.txtType !== TxtType.PLAIN) return { channel }
+      const { name } = splitSenderName(m.text)
+      return { channel, name, from: name ? this.contactByName(name) : undefined }
+    }
+    return {}
+  }
+
+  /**
+   * The contact with this name, if exactly one has it. Names are chosen by their owners and
+   * not unique; a name shared by several contacts identifies none of them.
+   */
+  private contactByName(name: string): string | undefined {
+    let found: string | undefined
+    for (const c of this.contacts.values()) {
+      if (cleanText(c.name).trim() !== name) continue
+      if (found) return undefined
+      found = idOf(c.publicKey)
+    }
+    return found
   }
 
   /** Request whose single response frame must have the given code. */
@@ -724,17 +766,18 @@ export class MeshCoreClient implements RadioClient {
     // 0xFF here means the message came by a direct route, so the hop count is not known.
     const hops = pathHops(m.pathLen)
 
-    const record = (from: string | undefined) =>
+    const record = (from: string | undefined, name?: string) =>
       queued &&
-      this.sink.packet?.({ ts, dir: 'rx', from, type: isChannel ? 'channel' : 'dm', channel: m.channel, hops, snr: m.snr, queued: true })
+      this.sink.packet?.({ ts, dir: 'rx', from, type: isChannel ? 'channel' : 'dm', channel: m.channel, hops, snr: m.snr, name, queued: true })
 
     if (isChannel) {
-      const sep = m.text.indexOf(': ')
-      const name = sep > 0 ? m.text.slice(0, sep) : ''
-      const text = sep > 0 ? m.text.slice(sep + 2) : m.text
+      // "<name>: <text>" by convention only; the text is whatever the sender wrote.
+      const split = splitSenderName(m.text)
+      const name = split.name ?? ''
+      const text = split.text
       const contact = name ? [...this.contacts.values()].find((c) => c.name === name) : undefined
       const from = contact ? idOf(contact.publicKey) : `name:${name || '?'}`
-      record(contact ? from : undefined)
+      record(name ? this.contactByName(name) : undefined, split.name)
       if (contact) this.sink.heard(from, now, m.channel)
       this.sink.message({
         id: `mc-ch${m.channel}-${m.senderTs}-${name}`,

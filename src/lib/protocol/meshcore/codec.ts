@@ -1,5 +1,6 @@
 // MeshCore companion radio protocol (examples/companion_radio in meshcore-dev/MeshCore).
 // Serial framing: app→radio '<' len16le payload; radio→app '>' len16le payload.
+import { cleanText } from '../../sanitize'
 import { cString, hex, LeReader, LeWriter, utf8Encode } from '../bytes'
 
 export const Cmd = {
@@ -435,6 +436,77 @@ export async function groupTextCiphertext(secret: Uint8Array, ts: number, name: 
     out.set(new Uint8Array(block, 0, 16), i)
   }
   return out
+}
+
+const ZERO_IV = new Uint8Array(16)
+
+/** Channel hash: first byte of SHA-256 over the secret, as the firmware computes it. */
+export async function channelHash(secret: Uint8Array): Promise<number> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', secret.slice()))[0]
+}
+
+/** AES-128-ECB decryption via WebCrypto, which has no ECB mode: two CBC calls per block. */
+async function ecbDecrypt(secret: Uint8Array, ct: Uint8Array): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey('raw', secret.slice(0, 16), 'AES-CBC', false, ['encrypt', 'decrypt'])
+  const pad = new Uint8Array(16).fill(16)
+  const out = new Uint8Array(ct.length)
+  for (let i = 0; i < ct.length; i += 16) {
+    const c = ct.slice(i, i + 16)
+    // A second block X = E(pad ^ C) decrypts to pad, valid PKCS#7, so CBC returns just D(C).
+    const x = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv: ZERO_IV }, key, pad.map((b, j) => b ^ c[j]))).slice(0, 16)
+    const both = new Uint8Array(32)
+    both.set(c)
+    both.set(x, 16)
+    out.set(new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CBC', iv: ZERO_IV }, key, both)), i)
+  }
+  return out
+}
+
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true })
+
+/**
+ * Decrypts a GRP_TXT payload [channel hash][MAC 2][ciphertext] with a channel secret
+ * (Utils::MACThenDecrypt). Null unless the hash and MAC match and the text is valid UTF-8.
+ * The result is untrusted: anyone with the channel key can write anything into it.
+ */
+export async function decryptGroupText(
+  secret: Uint8Array,
+  payload: Uint8Array,
+): Promise<{ ts: number; txtType: number; text: string } | null> {
+  const ct = payload.subarray(3)
+  if (secret.length < 16 || ct.length < 16 || ct.length % 16 || ct.length > 176) return null
+  if (payload[0] !== (await channelHash(secret))) return null
+  // HMAC key: the 32-byte secret buffer, zero-padded for 128-bit channel keys.
+  const macKey = new Uint8Array(32)
+  macKey.set(secret.subarray(0, 32))
+  const key = await crypto.subtle.importKey('raw', macKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, ct.slice()))
+  if (mac[0] !== payload[1] || mac[1] !== payload[2]) return null
+  const plain = await ecbDecrypt(secret, ct)
+  const end = plain.indexOf(0, 5)
+  try {
+    const text = strictUtf8.decode(plain.subarray(5, end < 0 ? plain.length : end))
+    return { ts: new DataView(plain.buffer).getUint32(0, true), txtType: plain[4] >> 2, text }
+  } catch {
+    return null
+  }
+}
+
+/** Longest sender name the firmware sends, in bytes. */
+const MAX_NAME_BYTES = 31
+
+/**
+ * Splits channel text "<name>: <text>" as the firmware formats it. The text comes from other
+ * nodes and need not follow the format: a name is returned only when the separator comes
+ * within the firmware's name length and the name is not empty once cleaned.
+ */
+export function splitSenderName(text: string): { name?: string; text: string } {
+  const sep = text.indexOf(': ')
+  if (sep <= 0) return { text }
+  const raw = text.slice(0, sep)
+  if (utf8Encode(raw).length > MAX_NAME_BYTES) return { text }
+  const name = cleanText(raw).trim()
+  return name ? { name, text: text.slice(sep + 2) } : { text }
 }
 
 export const PayloadType = { GRP_TXT: 5 } as const

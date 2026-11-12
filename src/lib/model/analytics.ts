@@ -14,7 +14,10 @@ export interface PacketRecord {
   snr?: number
   rssi?: number
   mqtt?: boolean
-  /** Sender's name where the packet carries it (node info, advert). */
+  /**
+   * Sender's name where the packet carries it: node info and adverts, or MeshCore channel text
+   * on our own channels, where it is only the name the sender typed (cleaned, unverified).
+   */
   name?: string
   /** MeshCore: another copy of a packet already recorded (a repeat via a different path). */
   dup?: boolean
@@ -253,7 +256,10 @@ export function timeOfDay(recs: PacketRecord[], spans: CoverageSpan[], f: Record
 export const BY_NODE_DAYS = 30
 
 export interface NodeTotals {
+  /** Node id; for a name-only sender "name:" + the name, never a node id. */
   id: string
+  /** MeshCore channel sender known by name only (not a single contact). */
+  nameOnly?: boolean
   count: number
   byType: Record<string, number>
   last: number
@@ -286,12 +292,14 @@ export function byNode(recs: PacketRecord[], f: RecordFilter, since: number, sel
       continue
     }
     received++
-    if (!r.from) {
+    const nameOnly = !r.from && r.type === 'channel' && !!r.name
+    const key = r.from ?? (nameOnly ? `name:${r.name}` : undefined)
+    if (!key) {
       unknown++
       continue
     }
-    let n = map.get(r.from)
-    if (!n) map.set(r.from, (n = { id: r.from, count: 0, byType: {}, last: 0, names: [], nameTs: new Map() }))
+    let n = map.get(key)
+    if (!n) map.set(key, (n = { id: key, count: 0, byType: {}, last: 0, names: [], nameTs: new Map(), ...(nameOnly && { nameOnly }) }))
     n.count++
     n.byType[r.type] = (n.byType[r.type] ?? 0) + 1
     n.last = Math.max(n.last, r.ts)

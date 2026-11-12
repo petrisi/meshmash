@@ -81,8 +81,8 @@ describe('MeshCore messages held by the radio', () => {
     synced(channelMsg('Hill: hello'), true)
     synced(contactMsg(OTHER), true)
     expect(records).toEqual([
-      { ts: ts * 1000, dir: 'rx', from: undefined, type: 'channel', channel: 2, hops: 1, snr: 2, queued: true },
-      { ts: ts * 1000, dir: 'rx', from: hex6(OTHER), type: 'dm', channel: undefined, hops: 0, snr: 0, queued: true },
+      { ts: ts * 1000, dir: 'rx', from: undefined, type: 'channel', channel: 2, hops: 1, snr: 2, name: 'Hill', queued: true },
+      { ts: ts * 1000, dir: 'rx', from: hex6(OTHER), type: 'dm', channel: undefined, hops: 0, snr: 0, name: undefined, queued: true },
     ])
   })
 

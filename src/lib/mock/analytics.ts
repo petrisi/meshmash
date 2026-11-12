@@ -33,6 +33,9 @@ const MC_TYPES: [string, number][] = [
 const MT_TX: [string, number][] = [['text', 5], ['position', 2], ['nodeinfo', 2], ['traceroute', 1]]
 const MC_TX: [string, number][] = [['channel', 5], ['dm', 2], ['advert', 2], ['request', 1]]
 
+/** Channel senders not among the contacts. */
+const STRANGERS = ['Kettu', 'Mobile 7', 'Lumi', 'Retki']
+
 /** Relative activity by local hour: quiet nights, busy evenings. */
 const DIURNAL = [0.35, 0.3, 0.28, 0.27, 0.3, 0.4, 0.6, 0.85, 1, 1, 0.95, 0.95, 1, 0.95, 0.9, 0.95, 1.05, 1.15, 1.3, 1.35, 1.3, 1.1, 0.8, 0.5]
 
@@ -73,8 +76,9 @@ export function demoAnalytics(
         const ts = h + r() * (end - h)
         const type = pick(r, mt ? MT_TYPES : MC_TYPES)
         const node = pick(r, weighted)
-        // MeshCore tells the sender only for adverts (and a few requests).
-        const known = mt || type === 'advert' || (type === 'request' && r() < 0.3)
+        // MeshCore tells the sender only for adverts (and a few requests); channel texts carry
+        // a name, matched to a contact where one has it.
+        const known = mt || type === 'advert' || (type === 'request' && r() < 0.3) || (type === 'channel' && r() < 0.7)
         const rec: PacketRecord = {
           ts,
           dir: 'rx',
@@ -84,7 +88,8 @@ export function demoAnalytics(
           snr: Math.round((r() * 20 - 12) * 4) / 4,
           rssi: -60 - Math.floor(r() * 60),
         }
-        if ((type === 'nodeinfo' || type === 'advert') && known) rec.name = node.longName
+        if ((type === 'nodeinfo' || type === 'advert' || type === 'channel') && known) rec.name = node.longName
+        if (type === 'channel' && !known && r() < 0.6) rec.name = STRANGERS[Math.floor(r() * STRANGERS.length)]
         records.push(rec)
         // Repeats of the same MeshCore packet heard via other paths.
         if (!mt && r() < 0.35) records.push({ ...rec, ts: ts + 400 + r() * 3000, dup: true, hops: (rec.hops ?? 0) + 1 })

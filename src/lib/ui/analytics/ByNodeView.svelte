@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago } from '../../format'
+  import { ago, initials } from '../../format'
   import {
     activity,
     BY_NODE_DAYS,
@@ -45,9 +45,13 @@
   const isSelf = $derived(selected === app.selfId)
   const sel = $derived<NodeTotals | null>(isSelf ? data.sent : (data.nodes.find((n) => n.id === selected) ?? null))
 
-  const nameOf = (n: NodeTotals) => app.nodeById.get(n.id)?.longName ?? n.names[0] ?? n.id
-  const shortOf = (n: NodeTotals) => app.nodeById.get(n.id)?.shortName ?? n.id.replace(/^!/, '').slice(-4)
-  const otherNames = (n: NodeTotals) => n.names.filter((x) => x !== nameOf(n))
+  const nameOf = (n: NodeTotals) => (n.nameOnly ? n.names[0] : (app.nodeById.get(n.id)?.longName ?? n.names[0] ?? n.id))
+  const shortOf = (n: NodeTotals) =>
+    n.nameOnly ? initials(n.names[0]) : (app.nodeById.get(n.id)?.shortName ?? n.id.replace(/^!/, '').slice(-4))
+  const otherNames = (n: NodeTotals) => (n.nameOnly ? [] : n.names.filter((x) => x !== nameOf(n)))
+  /** Shown in place of the node id. */
+  const idOf = (n: NodeTotals) => (n.nameOnly ? 'name only' : n.id)
+  const NAME_ONLY = 'Channel sender known only by the name in its messages; not verified'
   const share = (c: number) => (data.received ? `${((c / data.received) * 100).toFixed(c / data.received < 0.1 ? 1 : 0)}%` : '')
 
   const typeLabel = $derived(Object.fromEntries(PACKET_TYPES[app.protocol!].map((t) => [t.id, t.label])))
@@ -58,7 +62,11 @@
 
   const daily = $derived.by(() => {
     if (!sel) return []
-    const own = (r: PacketRecord) => (isSelf ? r.dir === 'tx' : r.dir === 'rx' && r.from === sel.id)
+    const s = sel
+    const own = (r: PacketRecord) =>
+      isSelf
+        ? r.dir === 'tx'
+        : r.dir === 'rx' && (s.nameOnly ? !r.from && r.type === 'channel' && r.name === s.names[0] : r.from === s.id)
     return activity(records.filter(own), coverage, '30d', now, filter)
   })
   const shortDate = (ts: number) => new Date(ts).toLocaleDateString([], { day: 'numeric', month: 'numeric' })
@@ -94,7 +102,7 @@
             <td class="b"><Badge id={n.id} label={shortOf(n)} size={20} /></td>
             <td class="name">
               <span class="ln">{nameOf(n)}</span>
-              <span class="mono faint">{n.id}</span>
+              <span class="mono faint" title={n.nameOnly ? NAME_ONLY : undefined}>{idOf(n)}</span>
               {#if others.length}<span class="faint aka" title={others.join(', ')}>also {others.join(', ')}</span>{/if}
             </td>
             <td class="num">{n.count}</td>
@@ -113,7 +121,7 @@
         <Badge id={sel.id} label={isSelf ? (app.nodeById.get(app.selfId)?.shortName ?? '') : shortOf(sel)} size={36} />
         <div class="titles">
           <div class="ttl">{isSelf ? 'This radio' : nameOf(sel)}</div>
-          <div class="mono muted">{sel.id}</div>
+          <div class="mono muted" title={sel.nameOnly ? NAME_ONLY : undefined}>{idOf(sel)}</div>
         </div>
       </div>
       {#if !isSelf && otherNames(sel).length}<p class="muted aka2">Also seen as {otherNames(sel).join(', ')}</p>{/if}
