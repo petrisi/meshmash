@@ -194,3 +194,56 @@ export function niceScale(max: number): { top: number; step: number } {
   const step = Math.max(1, [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw)!)
   return { top: Math.ceil(max / step) * step, step }
 }
+
+// Time of day: packets by local hour of reception, over all stored data.
+
+export type DaySet = 'all' | 'weekdays' | 'weekends'
+
+export interface HourOfDay {
+  hour: number
+  /** Packets received / sent in this hour of the day, over the whole period. */
+  rx: number
+  tx: number
+  /** Live packets only (not held by the radio): the numerators of the per-hour rates. */
+  rxLive: number
+  txLive: number
+  /** Connected time in this hour of the day, summed over days. */
+  coveredMs: number
+  /** Days with any connected time in this hour. */
+  days: number
+}
+
+const inSet = (ts: number, set: DaySet) => {
+  if (set === 'all') return true
+  const wd = new Date(ts).getDay()
+  return (wd === 0 || wd === 6) === (set === 'weekends')
+}
+
+export function timeOfDay(recs: PacketRecord[], spans: CoverageSpan[], f: RecordFilter, set: DaySet): HourOfDay[] {
+  const out: HourOfDay[] = Array.from({ length: 24 }, (_, hour) => ({ hour, rx: 0, tx: 0, rxLive: 0, txLive: 0, coveredMs: 0, days: 0 }))
+  for (const r of recs) {
+    if (!keepRecord(r, f) || !inSet(r.ts, set)) continue
+    const h = out[new Date(r.ts).getHours()]
+    h[r.dir]++
+    if (!r.queued) h[r.dir === 'rx' ? 'rxLive' : 'txLive']++
+  }
+  // Connected time, cut at local hour boundaries.
+  const days: Set<string>[] = Array.from({ length: 24 }, () => new Set())
+  for (const s of spans) {
+    let t = s.start
+    while (t < s.end) {
+      const d = new Date(t)
+      d.setMinutes(0, 0, 0)
+      d.setHours(d.getHours() + 1)
+      const next = Math.min(d.getTime(), s.end)
+      if (inSet(t, set)) {
+        const at = new Date(t)
+        out[at.getHours()].coveredMs += next - t
+        days[at.getHours()].add(at.toDateString())
+      }
+      t = next
+    }
+  }
+  days.forEach((d, i) => (out[i].days = d.size))
+  return out
+}

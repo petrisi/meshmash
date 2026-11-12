@@ -1,6 +1,6 @@
 // Activity chart buckets: edges in local time, counts by direction, filters, coverage.
 import { describe, expect, it } from 'vitest'
-import { activity, bucketEdges, coveredMs, niceScale, type PacketRecord } from '../src/lib/model/analytics'
+import { activity, bucketEdges, coveredMs, niceScale, type PacketRecord, timeOfDay } from '../src/lib/model/analytics'
 
 const H = 3_600_000
 const NOW = new Date(2026, 10, 12, 14, 25).getTime()
@@ -65,5 +65,30 @@ describe('niceScale', () => {
     expect(niceScale(3)).toEqual({ top: 3, step: 1 })
     expect(niceScale(37)).toEqual({ top: 40, step: 10 })
     expect(niceScale(130)).toEqual({ top: 150, step: 50 })
+  })
+})
+
+describe('timeOfDay', () => {
+  // Thu 12 Nov 2026 and Sat 14 Nov 2026, local time.
+  const at = (day: number, h: number, m = 0) => new Date(2026, 10, day, h, m).getTime()
+  const recs: PacketRecord[] = [
+    { ts: at(12, 9, 10), dir: 'rx', type: 'text' },
+    { ts: at(12, 9, 50), dir: 'tx', type: 'text' },
+    { ts: at(14, 9, 20), dir: 'rx', type: 'text', queued: true },
+    { ts: at(14, 21, 5), dir: 'rx', type: 'position' },
+  ]
+  const spans = [
+    { start: at(12, 8, 30), end: at(12, 10, 0) }, // Thu 8:30–10:00
+    { start: at(14, 9, 0), end: at(14, 9, 30) }, // Sat 9:00–9:30
+  ]
+  it('counts by local hour; held packets in totals only', () => {
+    const t = timeOfDay(recs, spans, all, 'all')
+    expect(t[9]).toMatchObject({ rx: 2, tx: 1, rxLive: 1, txLive: 1, coveredMs: 90 * 60_000, days: 2 })
+    expect(t[8]).toMatchObject({ rx: 0, coveredMs: 30 * 60_000, days: 1 })
+    expect(t[21]).toMatchObject({ rx: 1, coveredMs: 0, days: 0 })
+  })
+  it('weekdays and weekends', () => {
+    expect(timeOfDay(recs, spans, all, 'weekdays')[9]).toMatchObject({ rx: 1, tx: 1, coveredMs: H, days: 1 })
+    expect(timeOfDay(recs, spans, all, 'weekends')[9]).toMatchObject({ rx: 1, tx: 0, coveredMs: 30 * 60_000, days: 1 })
   })
 })

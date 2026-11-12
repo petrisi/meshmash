@@ -6,6 +6,8 @@
     tx: number
     /** Undefined: coverage does not apply (the bucket is not a span of time). */
     coveredMs?: number
+    /** Extra tooltip line. */
+    note?: string
   }
 
 </script>
@@ -89,6 +91,7 @@
     <span><i class="sw rx"></i>{rxLabel}</span>
     <span><i class="sw tx"></i>{txLabel}</span>
     {#if bars.some((b) => b.uncovered)}<span><i class="sw off"></i>Not connected</span>{/if}
+    <span class="ylab">y: {yLabel}</span>
   </div>
   <svg {width} height={H} role="img" aria-label="Bar chart of {yLabel}" onmouseleave={() => (hover = null)}>
     <defs>
@@ -133,6 +136,7 @@
       <div><i class="sw rx"></i>{rxLabel} <b>{format(hb.rx)}</b></div>
       <div><i class="sw tx"></i>{txLabel} <b>{format(hb.tx)}</b></div>
       {#if hb.coveredMs !== undefined}<div class="faint">Connected {mins(hb.coveredMs)}</div>{/if}
+      {#if hb.note}<div class="faint">{hb.note}</div>{/if}
     </div>
   {/if}
 </div>
@@ -157,6 +161,10 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+  }
+  .ylab {
+    margin-left: auto;
+    color: var(--faint);
   }
   .sw {
     display: inline-block;
