@@ -66,7 +66,10 @@
     return override ?? undefined
   }
   function keydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') replyTo = null
+    if (e.key === 'Enter' && !e.isComposing && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      submit()
+    } else if (e.key === 'Escape') replyTo = null
     else if (defHops !== undefined && e.altKey && /^Digit[0-7]$/.test(e.code)) {
       e.preventDefault()
       setHops(Number(e.code.slice(5)))
@@ -166,8 +169,7 @@
     tick().then(() => scroller?.querySelector(`#m-${CSS.escape(f.id)}`)?.scrollIntoView({ block: 'center' }))
   })
 
-  function submit(e: SubmitEvent) {
-    e.preventDefault()
+  function submit() {
     const text = draft.trim()
     if (!text || bytes > maxBytes) return
     app.send(thread, prefix + text, isMt ? (replyTo ?? undefined) : undefined, useHops())
@@ -283,7 +285,8 @@
       <button class="ghost" title="Cancel reply" onclick={() => (replyTo = null)}>✕</button>
     </div>
   {/if}
-  <form onsubmit={submit}>
+  <!-- No <form>: in Chrome, typing into a form field stalls for hundreds of ms per key on long threads. -->
+  <div class="compose">
     <input
       bind:this={input}
       onkeydown={keydown}
@@ -305,8 +308,8 @@
         onpick={setHops}
       />
     {/if}
-    <button class="primary" disabled={!draft.trim() || bytes > maxBytes}>Send</button>
-  </form>
+    <button class="primary" disabled={!draft.trim() || bytes > maxBytes} onclick={submit}>Send</button>
+  </div>
 </section>
 
 <style>
@@ -529,14 +532,14 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  form {
+  .compose {
     display: flex;
     gap: 8px;
     align-items: center;
     padding: 8px 14px;
     border-top: 1px solid var(--border);
   }
-  form input {
+  .compose input {
     flex: 1;
     padding: 7px 10px;
   }
@@ -544,7 +547,7 @@
     font-size: 11px;
     color: var(--faint);
   }
-  form button {
+  .compose > button {
     padding: 6px 16px;
   }
 </style>
