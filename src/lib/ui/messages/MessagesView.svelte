@@ -57,7 +57,7 @@
     {:else if peer}
       <NodeDetail node={peer} compact />
       <div class="foot">
-        {#if !peer.notInDb}<button class="ghost" onclick={() => app.showNode(peer.id)}>Open in Nodes →</button>{/if}
+        {#if app.canOpenNode(peer.id)}<button class="ghost" onclick={() => app.openNode(peer.id)}>Open in Nodes →</button>{/if}
         <button class="ghost" onclick={() => app.pinDm(peer.id, !app.dmPins.includes(peer.id))}
           >{app.dmPins.includes(peer.id) ? 'Unpin conversation' : 'Pin conversation'}</button
         >

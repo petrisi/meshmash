@@ -102,6 +102,7 @@ const MT_NOT_IN_DB: NodeAction[] = [
 export const NOT_IN_DB_ACTIONS = new Set(MT_NOT_IN_DB.map((a) => a.id))
 
 export function nodeActions(protocol: Protocol, node: MeshNode, isSelf: boolean): NodeAction[] {
+  if (node.placeholder) return [...MT_NOT_IN_DB, { id: 'remove-placeholder', label: 'Remove', title: 'Remove from this list' }]
   if (node.notInDb) return protocol === 'meshtastic' ? MT_NOT_IN_DB : []
   if (node.unsaved) return [{ id: 'add-contact', label: 'Add contact', primary: true }]
   if (isSelf) return [...radioActions(protocol), { id: 'configure', label: 'Configure radio' }]

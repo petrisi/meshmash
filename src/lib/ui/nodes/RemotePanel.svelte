@@ -76,7 +76,7 @@
     <tbody>
       {#each r.neighbours.list as n (n.id)}
         <tr>
-          <td class="nm"><button class="link" onclick={() => app.nodeById.has(n.id) && app.showNode(n.id)}>{name(n.id)}</button></td>
+          <td class="nm"><button class="link" onclick={() => app.openNode(n.id)}>{name(n.id)}</button></td>
           <td class="mono" title={n.snrThere !== undefined ? 'how we hear them ↓ / how they hear us ↑' : undefined}>
             {n.snrThere !== undefined ? `↓${n.snr} ↑${n.snrThere}` : n.snr} dB
           </td>

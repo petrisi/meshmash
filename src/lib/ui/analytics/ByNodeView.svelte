@@ -128,8 +128,8 @@
       <p class="muted">
         {sel.count} packets {isSelf ? 'sent' : 'received'} in {BY_NODE_DAYS} days{isSelf ? '' : ` · ${share(sel.count)} of received`}
       </p>
-      {#if !isSelf && app.nodeById.has(sel.id)}
-        <button class="ghost link" onclick={() => app.showNode(sel.id)}>Open in Nodes →</button>
+      {#if !isSelf && app.canOpenNode(sel.id)}
+        <button class="ghost link" onclick={() => app.openNode(sel.id)}>Open in Nodes →</button>
       {/if}
 
       <div class="section">By type</div>

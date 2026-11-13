@@ -25,6 +25,16 @@
       importError = e instanceof Error ? e.message : String(e)
     }
   }
+  // A full Meshtastic node id the radio does not know offers to add it as a placeholder.
+  const addId = $derived.by(() => {
+    const id = app.placeholderId(query)
+    return id && !app.nodeById.has(id) && !app.placeholderNodes.some((n) => n.id === id) ? id : null
+  })
+  function addPlaceholder() {
+    if (!addId) return
+    app.openNode(addId)
+    query = ''
+  }
   let filter = $state<string>('all')
   let sortKey = $state<SortKey>('heard')
   let sortAsc = $state(false)
@@ -34,6 +44,8 @@
 
   // Ignored: shown while any node is ignored, and while selected.
   const filters = $derived(nodeFilters(proto, filter === 'ignored' || app.nodes.some((n) => n.ignored)))
+  /** The radio's nodes, then placeholders added by id. */
+  const all = $derived(app.placeholderNodes.length ? [...app.nodes, ...app.placeholderNodes] : app.nodes)
 
   const cols = $derived<Col[]>([
     { key: 'name', label: 'Name' },
@@ -65,7 +77,7 @@
 
   const rows = $derived.by(() => {
     const f = filters.find((x) => x.id === filter) ?? filters[0]
-    const list = app.nodes.filter((n) => n.id !== app.selfId && f.test(n) && matchesQuery(n, query))
+    const list = all.filter((n) => n.id !== app.selfId && f.test(n) && matchesQuery(n, query))
     const dir = sortAsc ? 1 : -1
     list.sort((a, b) => {
       const va = val(a, sortKey)
@@ -100,14 +112,16 @@
     }
   }
 
-  const selected = $derived(app.selectedNode ? app.nodeById.get(app.selectedNode) : undefined)
+  const selected = $derived(
+    app.selectedNode ? (app.nodeById.get(app.selectedNode) ?? app.placeholderNodes.find((n) => n.id === app.selectedNode)) : undefined,
+  )
 
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
     e.preventDefault()
-    const all = selfNode ? [selfNode, ...shown] : shown
-    const i = all.findIndex((n) => n.id === app.selectedNode)
-    const next = all[Math.min(all.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))]
+    const list = selfNode ? [selfNode, ...shown] : shown
+    const i = list.findIndex((n) => n.id === app.selectedNode)
+    const next = list[Math.min(list.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))]
     if (next) {
       app.selectedNode = next.id
       document.getElementById(`node-${next.id}`)?.scrollIntoView({ block: 'nearest' })
@@ -126,10 +140,13 @@
         <button class="primary" onclick={importLink}>Add contact “{link.name || link.publicKey.slice(0, 12)}”</button>
         {#if importError}<span class="poor">{importError}</span>{/if}
       {/if}
+      {#if addId}
+        <button class="primary" title="Add to this list to exchange user info or run a traceroute" onclick={addPlaceholder}>Add {addId}</button>
+      {/if}
       <div class="chips">
         {#each filters as f (f.id)}
           <button class:on={filter === f.id} onclick={() => (filter = f.id)}>
-            {f.label} <span class="faint">{app.nodes.filter((n) => n.id !== app.selfId && f.test(n)).length}</span>
+            {f.label} <span class="faint">{all.filter((n) => n.id !== app.selfId && f.test(n)).length}</span>
           </button>
         {/each}
       </div>
@@ -164,7 +181,7 @@
               class:ignored={n.ignored}
               class:sel={app.selectedNode === n.id}
               onclick={() => (app.selectedNode = n.id)}
-              ondblclick={() => !isSelf && app.openDm(n.id)}
+              ondblclick={() => !isSelf && !n.placeholder && app.openDm(n.id)}
             >
               <td class="b"><Badge id={n.id} label={n.shortName} size={20} /></td>
               <td class="name">
@@ -172,9 +189,10 @@
                 {#if isSelf}<span class="you">YOU</span>{/if}
                 {#if n.favorite}<span class="star">★</span>{/if}
                 {#if n.ignored}<span class="ign">IGN</span>{/if}
-                <span class="mono faint id">{n.id}</span>
+                {#if n.placeholder}<span class="faint" title="Added by id; not in the radio's node list">not in radio</span>
+                {:else}<span class="mono faint id">{n.id}</span>{/if}
               </td>
-              <td class="muted">{n.role ?? KIND_LABEL[n.kind]}</td>
+              <td class="muted">{n.placeholder ? '' : (n.role ?? KIND_LABEL[n.kind])}</td>
               <td class="muted hw">{n.hwModel ?? ''}</td>
               <td class="num">{isSelf ? '' : ago(n.lastHeard, app.now)}</td>
               <td class="num">{isSelf ? '' : (n.hops ?? '—')}</td>

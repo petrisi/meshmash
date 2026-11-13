@@ -18,6 +18,7 @@ import type {
   TracerouteResult,
 } from './model/types'
 import { demoAnalytics } from './mock/analytics'
+import { placeholderId } from './model/placeholders'
 import { DemoRadio } from './mock/demo'
 import { mockSession } from './mock/mock'
 import { canResend } from './model/delivery'
@@ -122,6 +123,8 @@ class AppState {
   view = $state<View>('messages')
   activeThread = $state<ThreadKey | null>(null)
   selectedNode = $state<string | null>(null)
+  /** Meshtastic node ids added in meshmash, per radio; kept across reconnects, not stored. */
+  #placeholders = $state<Record<string, string[]>>({})
   /** The channel slot open in the channel editor. */
   channelEditor = $state<{ index: number; isNew: boolean } | null>(null)
   /** Set by showOnMap; the map centres on this node when n changes. */
@@ -146,6 +149,12 @@ class AppState {
   protocol = $derived<Protocol | null>(this.session?.info.protocol ?? null)
   selfId = $derived(this.session?.info.nodeId ?? '')
   nodeById = $derived(new Map(this.nodes.map((n) => [n.id, n])))
+  /** Placeholders of this radio that the radio has not reported (yet). */
+  placeholderNodes = $derived<MeshNode[]>(
+    (this.#placeholders[this.selfId] ?? [])
+      .filter((id) => !this.nodeById.has(id))
+      .map((id) => ({ ...this.peerNode(id), placeholder: true })),
+  )
 
   byThread = $derived.by(() => {
     const m = new Map<ThreadKey, Message[]>()
@@ -454,7 +463,10 @@ class AppState {
       node: (patch) => {
         const n = this.nodeById.get(patch.id)
         if (n) Object.assign(n, patch)
-        else this.nodes.push({ longName: patch.id, shortName: '?', kind: 'client', ...patch })
+        else {
+          this.nodes.push({ longName: patch.id, shortName: '?', kind: 'client', ...patch })
+          this.#dropPlaceholder(patch.id)
+        }
         const v: Record<string, number> = {}
         for (const k of SAMPLED) if (typeof patch[k] === 'number' && !Number.isNaN(patch[k])) v[k] = patch[k]
         if (this.connecting === null && Object.keys(v).length) this.#sample(patch.id, v)
@@ -690,6 +702,39 @@ class AppState {
   showNode(nodeId: string) {
     this.selectedNode = nodeId
     this.view = 'nodes'
+  }
+
+  /** A full Meshtastic node id ("!1234abcd") that can be added as a placeholder, lower-cased; else null. */
+  placeholderId(text: string): string | null {
+    return this.protocol === 'meshtastic' ? placeholderId(text, this.selfId) : null
+  }
+
+  /** Whether the node can be opened in Nodes: known to the radio, or addable as a placeholder. */
+  canOpenNode(nodeId: string): boolean {
+    return this.nodeById.has(nodeId) || this.placeholderId(nodeId) !== null
+  }
+
+  /** Opens the node in Nodes, adding a placeholder when the radio does not know it. */
+  openNode(nodeId: string) {
+    if (!this.nodeById.has(nodeId)) {
+      const id = this.placeholderId(nodeId)
+      if (!id) return
+      const list = this.#placeholders[this.selfId] ?? []
+      if (!list.includes(id)) this.#placeholders[this.selfId] = [...list, id]
+      nodeId = id
+    }
+    this.showNode(nodeId)
+  }
+
+  removePlaceholder(nodeId: string) {
+    this.#dropPlaceholder(nodeId)
+    if (this.selectedNode === nodeId) this.selectedNode = null
+  }
+
+  /** The radio knows the node now, or the user removed it. */
+  #dropPlaceholder(nodeId: string) {
+    const list = this.#placeholders[this.selfId]
+    if (list?.includes(nodeId)) this.#placeholders[this.selfId] = list.filter((id) => id !== nodeId)
   }
 
   showOnMap(nodeId: string) {
@@ -1037,6 +1082,7 @@ class AppState {
   }
 
   runAction(action: string, nodeId: string) {
+    if (action === 'remove-placeholder') return this.removePlaceholder(nodeId)
     const node = this.nodeById.get(nodeId) ?? (NOT_IN_DB_ACTIONS.has(action) ? this.peerNode(nodeId) : undefined)
     if (!node) return
     if (action === 'dm') return this.openDm(nodeId)
@@ -1111,7 +1157,15 @@ class AppState {
       case 'req-position':
         return answer(() => (node.position ? 'Position received' : 'No position shared'))
       case 'exchange-info':
-        return answer(() => 'User info received')
+        return answer(() => {
+          // As on a radio: the answer puts an unknown node into the node list.
+          if (!this.nodeById.has(nodeId)) {
+            const short = nodeId.slice(-4)
+            this.nodes.push({ id: nodeId, longName: `Meshtastic ${short}`, shortName: short, kind: 'client', lastHeard: Date.now(), hops: 2 })
+            this.#dropPlaceholder(nodeId)
+          }
+          return 'User info received'
+        })
       case 'req-telemetry':
         return answer(() => {
           if (!isMt) {

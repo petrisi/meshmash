@@ -54,7 +54,7 @@
       <ol>
         {#each leg.ids as id, i (i)}
           <li>
-            <button class="hop" onclick={() => app.nodeById.has(id) && app.showNode(id)}>{name(id)}</button>
+            <button class="hop" onclick={() => app.openNode(id)}>{name(id)}</button>
             {#if i > 0 && leg.snr.length}<span class="mono {snrClass(leg.snr[i - 1])}">{db(leg.snr[i - 1])}</span>{/if}
           </li>
         {/each}

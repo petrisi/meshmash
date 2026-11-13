@@ -67,6 +67,8 @@ export interface MeshNode {
   unsaved?: boolean
   /** Placeholder for a DM peer missing from the radio's node list (e.g. after a NodeDB reset). */
   notInDb?: boolean
+  /** Added by id in meshmash (Meshtastic); dropped when the radio reports the node. */
+  placeholder?: boolean
 }
 
 export type ChannelKind = 'primary' | 'secondary' | 'public' | 'hashtag' | 'private'
