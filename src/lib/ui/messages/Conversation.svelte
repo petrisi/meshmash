@@ -211,6 +211,8 @@
   </div>
 
   <div class="scroll" bind:this={scroller}>
+    <!-- Rows in one block: as flex items of .scroll, every text change re-ran flex layout over all rows. -->
+    <div class="rows">
     {#each msgs as m, i (m.id)}
       {@const prev = msgs[i - 1]}
       {@const n = app.nodeById.get(m.from)}
@@ -275,6 +277,7 @@
         <span class="c mono">{#if mine}<Delivery {m} />{/if}</span>
       </div>
     {/each}
+    </div>
   </div>
 
   {#if replyTo}
@@ -349,14 +352,16 @@
     flex-direction: column;
   }
   /* Short threads sit at the bottom, next to the composer. */
-  .scroll > :first-child {
+  .rows {
     margin-top: auto;
   }
   .day {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 10px 14px 4px;
+    /* Padding, not margin: block margins between rows would collapse. */
+    margin: 0 14px;
+    padding: 10px 0 4px;
     font-size: 11px;
     color: var(--faint);
   }
