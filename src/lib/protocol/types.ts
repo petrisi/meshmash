@@ -64,6 +64,8 @@ export interface Probe {
 export interface ActionContext {
   /** Latest path discovery result. */
   route?: FoundRoute
+  /** Meshtastic channel index for broadcasts. */
+  channel?: number
 }
 
 export interface SendOptions {

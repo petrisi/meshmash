@@ -8,6 +8,12 @@
   const SHOW_FAIL_MS = 10_000
 
   const r = $derived(app.results[nodeId]?.[action])
+  /** Where a Meshtastic broadcast goes, shown before sending. */
+  const target = $derived(
+    app.protocol === 'meshtastic' && (action === 'send-nodeinfo' || action === 'send-position')
+      ? `On ${app.broadcastChannel?.name ?? 'primary'}`
+      : undefined,
+  )
   const state = $derived.by(() => {
     if (!r) return 'idle'
     if (r.state === 'pending') return 'pending'
@@ -21,7 +27,7 @@
 <button
   class={state}
   disabled={state === 'pending'}
-  title={state === 'idle' ? undefined : (r?.text ?? '')}
+  title={state === 'idle' ? target : (r?.text ?? '')}
   onclick={() => app.runAction(action, nodeId)}
 >
   {#if state === 'pending'}<i class="spin"></i>{:else if state === 'ok'}<b>✓</b>{:else if state === 'failed'}<b>✕</b>{/if}

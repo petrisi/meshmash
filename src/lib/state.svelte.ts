@@ -64,6 +64,8 @@ const REQUEST_ACTIONS = new Set([
   'path-discovery', 'trace', 'req-status', 'req-neighbours', 'req-owner',
   'advert-zero', 'advert-flood', 'send-nodeinfo', 'send-position', 'use-path', 'discover', 'add-contact', 'share', 'reset-path',
 ])
+/** Meshtastic broadcasts sent on the open channel. */
+const BROADCAST_ACTIONS = new Set(['send-nodeinfo', 'send-position'])
 /** Likely reasons when a request times out. */
 const TIMEOUT_TEXT: Record<string, string> = {
   'req-neighbours': 'No answer (Meshtastic: needs 2.7.16+ with neighbour info enabled)',
@@ -1081,6 +1083,13 @@ class AppState {
     this.#analyticsDirty = false
   }
 
+  /** Meshtastic channel for node info and position broadcasts: the open channel, else the primary. */
+  get broadcastChannel(): Channel | undefined {
+    const t = this.activeThread
+    const index = t?.startsWith('ch:') ? Number(t.slice(3)) : 0
+    return this.channels.find((c) => c.index === index) ?? this.channels.find((c) => c.index === 0)
+  }
+
   runAction(action: string, nodeId: string) {
     if (action === 'remove-placeholder') return this.removePlaceholder(nodeId)
     const node = this.nodeById.get(nodeId) ?? (NOT_IN_DB_ACTIONS.has(action) ? this.peerNode(nodeId) : undefined)
@@ -1093,7 +1102,10 @@ class AppState {
           if (this.results[nodeId]?.[action]?.ts === r.ts) this.#result(nodeId, action, 'failed', TIMEOUT_TEXT[action] ?? 'No answer')
         }, REQUEST_TIMEOUT_MS)
       }
-      this.#client.action(action, nodeId, { route: $state.snapshot(this.foundRoutes[nodeId]) }).catch((e) => {
+      this.#client.action(action, nodeId, {
+        route: $state.snapshot(this.foundRoutes[nodeId]),
+        channel: BROADCAST_ACTIONS.has(action) ? this.broadcastChannel?.index : undefined,
+      }).catch((e) => {
         this.#result(nodeId, action, 'failed', e instanceof Error ? e.message : String(e))
         this.#log({ dir: 'error', kind: action, summary: String(e) })
       })
@@ -1134,8 +1146,8 @@ class AppState {
         const text = {
           'advert-zero': 'Zero-hop advert sent',
           'advert-flood': 'Flood advert sent',
-          'send-nodeinfo': 'Node info broadcast',
-          'send-position': 'Position broadcast',
+          'send-nodeinfo': `Node info broadcast on ${this.broadcastChannel?.name ?? 'primary'}`,
+          'send-position': `Position broadcast on ${this.broadcastChannel?.name ?? 'primary'}`,
           share: 'Advert re-sent to radios in direct range',
         }[action]
         this.pushLog(text)

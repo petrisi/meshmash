@@ -4,7 +4,7 @@ import { mtPacketType } from '../../model/analytics'
 import { sameBytes } from '../../model/channels'
 import type { Channel, ChannelConfig, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import { hex, utf8Decode, utf8Encode } from '../bytes'
-import type { Probe, RadioClient, RadioSink, SendOptions } from '../types'
+import type { ActionContext, Probe, RadioClient, RadioSink, SendOptions } from '../types'
 import type { Transport } from '../../transport/types'
 import {
   Admin,
@@ -698,7 +698,7 @@ export class MeshtasticClient implements RadioClient {
     return answer
   }
 
-  async action(action: string, id: string) {
+  async action(action: string, id: string, ctx: ActionContext = {}) {
     const num = nodeNum(id)
     const self = this.nodes.get(this.myNum)
     switch (action) {
@@ -734,9 +734,9 @@ export class MeshtasticClient implements RadioClient {
         const isInfo = action === 'send-nodeinfo'
         if (isInfo ? !self?.user : !self?.position?.lat) throw new Error(isInfo ? 'Own user info unknown' : 'Own position unknown')
         const payload = isInfo ? ownUser(self!.user!) : encodePosition(self!.position!)
-        const pid = await this.sendPacket(BROADCAST, isInfo ? Port.NODEINFO : Port.POSITION, payload)
+        const pid = await this.sendPacket(BROADCAST, isInfo ? Port.NODEINFO : Port.POSITION, payload, { channel: ctx.channel })
         this.onAccepted.set(pid, (ok) =>
-          this.sink.actionResult(id, action, ok, ok ? 'Broadcast sent' : 'Radio did not confirm'),
+          this.sink.actionResult(id, action, ok, ok ? `Sent on ${this.channels().find((c) => c.index === (ctx.channel ?? 0))?.name ?? 'primary'}` : 'Radio did not confirm'),
         )
         return
       }
