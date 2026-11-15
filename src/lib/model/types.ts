@@ -63,6 +63,8 @@ export interface MeshNode {
   /** Meshtastic: packets from this node are dropped by our radio. */
   ignored?: boolean
   viaMqtt?: boolean
+  /** Meshtastic: channel index the node was last heard on; requests to it go there. */
+  channel?: number
   /** MeshCore: heard, but not in the radio's contacts (manual add mode or table full). */
   unsaved?: boolean
   /** Placeholder for a DM peer missing from the radio's node list (e.g. after a NodeDB reset). */

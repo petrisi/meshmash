@@ -352,6 +352,7 @@ export class MeshtasticClient implements RadioClient {
       favorite: n.isFavorite,
       ignored: n.isIgnored,
       viaMqtt: n.viaMqtt,
+      channel: n.num === this.myNum ? undefined : (n.channel ?? 0),
     }
   }
 
@@ -372,12 +373,18 @@ export class MeshtasticClient implements RadioClient {
       const patch: Partial<MeshNode> & { id: string } = { id: fromId }
       if (newer) patch.lastHeard = rxAt
       if (newer && hops !== undefined) patch.hops = hops
+      // Like the firmware's NodeDB: the channel of a packet decoded with a channel key. For
+      // undecoded packets the field holds the channel hash, and PKI packets carry no channel.
+      if (newer && p.decoded && !p.pkiEncrypted && known?.channel !== p.channel) {
+        patch.channel = p.channel
+        if (known) known.channel = p.channel
+      }
       if (newer && hops === 0 && p.rxSnr) {
         patch.snr = p.rxSnr
         patch.rssi = p.rxRssi
       }
       if (!known) {
-        this.nodes.set(p.from, { num: p.from, lastHeard: rxAt / 1000 })
+        this.nodes.set(p.from, { num: p.from, lastHeard: rxAt / 1000, channel: patch.channel })
         this.sink.node({ ...this.toNode({ num: p.from }), ...patch })
       } else {
         if (newer) known.lastHeard = rxAt / 1000
@@ -701,31 +708,34 @@ export class MeshtasticClient implements RadioClient {
   async action(action: string, id: string, ctx: ActionContext = {}) {
     const num = nodeNum(id)
     const self = this.nodes.get(this.myNum)
+    // Requests go on the channel the node was last heard on; the primary if unknown or gone.
+    const heardOn = this.nodes.get(num)?.channel ?? 0
+    const channel = this.channelInfos[heardOn] && this.channelInfos[heardOn].role !== 0 ? heardOn : 0
     switch (action) {
       case 'req-neighbours': {
-        const pid = await this.sendPacket(num, Port.NEIGHBORINFO, new Uint8Array(), { wantResponse: true })
+        const pid = await this.sendPacket(num, Port.NEIGHBORINFO, new Uint8Array(), { wantResponse: true, channel })
         this.requests.set(pid, { action, nodeId: id })
         return
       }
       case 'traceroute': {
-        const pid = await this.sendPacket(num, Port.TRACEROUTE, new Uint8Array(), { wantResponse: true })
+        const pid = await this.sendPacket(num, Port.TRACEROUTE, new Uint8Array(), { wantResponse: true, channel })
         this.requests.set(pid, { action, nodeId: id })
         return
       }
       case 'req-position': {
         const payload = self?.position ? encodePosition(self.position) : new Uint8Array()
-        const pid = await this.sendPacket(num, Port.POSITION, payload, { wantResponse: true })
+        const pid = await this.sendPacket(num, Port.POSITION, payload, { wantResponse: true, channel })
         this.requests.set(pid, { action, nodeId: id })
         return
       }
       case 'req-telemetry': {
-        const pid = await this.sendPacket(num, Port.TELEMETRY, encodeTelemetryRequest(), { wantResponse: true })
+        const pid = await this.sendPacket(num, Port.TELEMETRY, encodeTelemetryRequest(), { wantResponse: true, channel })
         this.requests.set(pid, { action, nodeId: id })
         return
       }
       case 'exchange-info': {
         if (!self?.user) throw new Error('own user info unknown')
-        const pid = await this.sendPacket(num, Port.NODEINFO, ownUser(self.user), { wantResponse: true })
+        const pid = await this.sendPacket(num, Port.NODEINFO, ownUser(self.user), { wantResponse: true, channel })
         this.requests.set(pid, { action, nodeId: id })
         return
       }

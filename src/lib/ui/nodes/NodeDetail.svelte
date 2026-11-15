@@ -136,6 +136,10 @@
         <dt>Path</dt>
         <dd class="mono">{node.path === undefined ? 'flood' : node.path.length ? node.path.join(' → ') : 'direct'}</dd>
       {/if}
+      {#if proto === 'meshtastic' && node.channel !== undefined}
+        <dt>Channel</dt>
+        <dd title="Last heard on; requests go on this channel">{app.channels.find((c) => c.index === node.channel)?.name ?? `#${node.channel}`}</dd>
+      {/if}
       <dt>SNR</dt><dd class={snrClass(node.snr)}>{node.snr !== undefined ? `${node.snr} dB` : '—'}</dd>
       <dt>RSSI</dt><dd>{node.rssi !== undefined ? `${node.rssi} dBm` : '—'}</dd>
     </dl>

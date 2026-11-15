@@ -38,3 +38,49 @@ describe('Meshtastic broadcasts', () => {
     ])
   })
 })
+
+describe('Meshtastic requests', () => {
+  type Inner = {
+    nodes: Map<number, { num: number; channel?: number; lastHeard?: number }>
+    channelInfos: { index: number; role: number }[]
+    onPacket: (p: MeshPacket) => void
+  }
+  const PEER = 0x0a0b0c0d
+  const withChannels = (roles: number[]) => {
+    const s = setup()
+    const inner = s.client as unknown as Inner
+    inner.channelInfos = roles.map((role, index) => ({ index, role }))
+    return { ...s, inner }
+  }
+  const traceOn = async (s: ReturnType<typeof withChannels>) => {
+    await s.client.action('traceroute', '!0a0b0c0d')
+    return s.packets.map((p) => [p.to, p.channel ?? 0])
+  }
+
+  it('go on the channel the node was last heard on', async () => {
+    const s = withChannels([1, 2, 2])
+    s.inner.nodes.set(PEER, { num: PEER, channel: 2 })
+    expect(await traceOn(s)).toEqual([[PEER, 2]])
+  })
+
+  it('go on the primary for unknown nodes and for a channel no longer in use', async () => {
+    expect(await traceOn(withChannels([1, 2]))).toEqual([[PEER, 0]])
+    const s = withChannels([1, 2, 0])
+    s.inner.nodes.set(PEER, { num: PEER, channel: 2 })
+    expect(await traceOn(s)).toEqual([[PEER, 0]])
+  })
+
+  it('the channel follows packets decoded with a channel key only', () => {
+    const s = withChannels([1, 2, 2])
+    let rxTime = Math.floor(Date.now() / 1000) - 100
+    const hear = (p: Partial<MeshPacket>) =>
+      s.inner.onPacket({ from: PEER, to: 0xffffffff, id: 1, channel: 0, rxTime: ++rxTime, ...p } as MeshPacket)
+    hear({ channel: 2, decoded: { portnum: 1, payload: new Uint8Array() } as MeshPacket['decoded'] })
+    expect(s.inner.nodes.get(PEER)?.channel).toBe(2)
+    hear({ channel: 0, pkiEncrypted: true, decoded: { portnum: 1, payload: new Uint8Array() } as MeshPacket['decoded'] })
+    hear({ channel: 0x5c })
+    expect(s.inner.nodes.get(PEER)?.channel).toBe(2)
+    hear({ channel: 1, decoded: { portnum: 1, payload: new Uint8Array() } as MeshPacket['decoded'] })
+    expect(s.inner.nodes.get(PEER)?.channel).toBe(1)
+  })
+})
