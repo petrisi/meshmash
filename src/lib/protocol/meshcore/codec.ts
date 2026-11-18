@@ -30,9 +30,11 @@ export const Cmd = {
   SEND_TELEMETRY_REQ: 39,
   SEND_BINARY_REQ: 50,
   SEND_PATH_DISCOVERY_REQ: 52,
+  SET_FLOOD_SCOPE_KEY: 54,
   SEND_CONTROL_DATA: 55,
   SET_AUTOADD_CONFIG: 58,
   GET_AUTOADD_CONFIG: 59,
+  GET_DEFAULT_FLOOD_SCOPE: 64,
 } as const
 
 export const Resp = {
@@ -55,6 +57,7 @@ export const Resp = {
   CHANNEL_MSG_RECV_V3: 17,
   CHANNEL_INFO: 18,
   AUTOADD_CONFIG: 25,
+  DEFAULT_FLOOD_SCOPE: 28,
 } as const
 
 export const Push = {
@@ -414,6 +417,8 @@ export function splitPacket(raw: Uint8Array) {
     /** Flood routes: hops taken so far. Direct routes: hops still to go. */
     hops,
     pathLen,
+    /** Transport codes (route types 0 and 3); codes[0] is the flood scope, 0 for none. */
+    codes: routeType === 0 || routeType === 3 ? ([raw[1] | (raw[2] << 8), raw[3] | (raw[4] << 8)] as const) : undefined,
     payload: raw.subarray(i + hops * hashSize),
   }
 }
@@ -583,3 +588,16 @@ export const cmdSendChannelText = (channel: number, text: string, ts: number) =>
   new LeWriter().u8(Cmd.SEND_CHANNEL_TXT_MSG).u8(TxtType.PLAIN).u8(channel).u32(ts).bytes(utf8Encode(text)).finish()
 
 export { cString }
+
+/**
+ * CMD_SET_FLOOD_SCOPE_KEY: a region key for the floods that follow, until changed (RAM only);
+ * null clears it (back to the radio's default scope); 'none' sends unscoped (firmware ver 12+).
+ */
+export const cmdSetFloodScope = (key: Uint8Array | null | 'none') =>
+  key === 'none' ? Uint8Array.of(Cmd.SET_FLOOD_SCOPE_KEY, 1) : key ? Uint8Array.of(Cmd.SET_FLOOD_SCOPE_KEY, 0, ...key) : Uint8Array.of(Cmd.SET_FLOOD_SCOPE_KEY, 0)
+export const cmdGetDefaultFloodScope = () => Uint8Array.of(Cmd.GET_DEFAULT_FLOOD_SCOPE)
+/** RESP_DEFAULT_FLOOD_SCOPE: [28][name 31, NUL-padded][key 16], or [28] alone for none. */
+export function decodeDefaultFloodScope(f: Uint8Array): { name: string; key: Uint8Array } | null {
+  if (f.length < 1 + 31 + 16) return null
+  return { name: cString(f.subarray(1, 32)), key: f.slice(32, 48) }
+}

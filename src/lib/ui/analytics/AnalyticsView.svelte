@@ -3,15 +3,19 @@
   import { app } from '../../state.svelte'
   import ActivityView from './ActivityView.svelte'
   import ByNodeView from './ByNodeView.svelte'
+  import ScopesView from './ScopesView.svelte'
   import TimeOfDayView from './TimeOfDayView.svelte'
   import TypeFilter from './TypeFilter.svelte'
 
-  type Tab = 'activity' | 'time' | 'nodes'
-  const TABS: { id: Tab; label: string }[] = [
+  type Tab = 'activity' | 'time' | 'nodes' | 'scopes'
+  const ALL_TABS: { id: Tab; label: string }[] = [
     { id: 'activity', label: 'Activity' },
     { id: 'time', label: 'Time of day' },
     { id: 'nodes', label: 'By node' },
+    { id: 'scopes', label: 'Scopes' },
   ]
+  // Flood scopes are MeshCore only.
+  const TABS = $derived(ALL_TABS.filter((t) => t.id !== 'scopes' || app.protocol === 'meshcore'))
 
   let tab = $state<Tab>('activity')
   let range = $state<ActivityRange>('24h')
@@ -71,8 +75,10 @@
       <ActivityView records={data.records} coverage={data.coverage} {filter} bind:range bind:counts />
     {:else if tab === 'time'}
       <TimeOfDayView records={data.records} coverage={data.coverage} {filter} bind:counts />
-    {:else}
+    {:else if tab === 'nodes'}
       <ByNodeView records={data.records} coverage={data.coverage} {filter} bind:counts />
+    {:else if proto === 'meshcore'}
+      <ScopesView records={data.records} coverage={data.coverage} {filter} bind:counts />
     {/if}
   {/if}
 </div>

@@ -133,6 +133,8 @@ export interface Message {
   pki?: boolean
   /** Outgoing, Meshtastic: hop limit chosen instead of the radio default. */
   hopLimit?: number
+  /** MeshCore channel text sent with its own flood scope: region name, or null for unscoped. */
+  scope?: string | null
   /** Outgoing: times sent again by the user (0 or absent: first send only). */
   attempt?: number
   /** Outgoing DM, MeshCore: timestamp in the message (radio clock, seconds), reused on a resend. */
@@ -169,6 +171,11 @@ export interface Capabilities {
   messageMaxBytes: number
   /** Meshtastic: the radio's configured hop limit; set when messages can override it. */
   hopLimit?: number
+  /**
+   * MeshCore: flood scopes can be set per message (firmware ver 8+). `radioDefault` is the
+   * scope the radio uses otherwise: a name, null for none, undefined when not known.
+   */
+  floodScope?: { radioDefault?: string | null; canUnscoped: boolean }
 }
 
 /** Data fetched from a node on request (MeshCore servers and telemetry). */

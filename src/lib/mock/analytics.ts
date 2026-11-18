@@ -90,6 +90,8 @@ export function demoAnalytics(
         }
         if ((type === 'nodeinfo' || type === 'advert' || type === 'channel') && known) rec.name = node.longName
         if (type === 'channel' && !known && r() < 0.6) rec.name = STRANGERS[Math.floor(r() * STRANGERS.length)]
+        // Flood scope: recorded for the last two weeks only, like an update partway through.
+        if (!mt && ts > now - 14 * 24 * HOUR) rec.scope = pick<string | null>(r, [[null, 55], ['fi', 30], ['', 15]])
         records.push(rec)
         // Repeats of the same MeshCore packet heard via other paths.
         if (!mt && r() < 0.35) records.push({ ...rec, ts: ts + 400 + r() * 3000, dup: true, hops: (rec.hops ?? 0) + 1 })

@@ -3,6 +3,7 @@ import { REPEAT_WINDOW_MS } from '../../model/capabilities'
 import { mcPacketType, type PacketRecord, RepeatFilter } from '../../model/analytics'
 import { cleanText } from '../../sanitize'
 import { sameBytes } from '../../model/channels'
+import { scopeKey, transportCode } from '../../model/scope'
 import type { Channel, ChannelConfig, ContactSettings, FoundRoute, MeshNode, NodeKind, RadioInfo, ThreadKey } from '../../model/types'
 import type { Transport } from '../../transport/types'
 import { endsWith, hex, LeReader, utf8Encode } from '../bytes'
@@ -76,6 +77,9 @@ import {
   cmdGetAutoAdd,
   cmdSetAutoAdd,
   cmdSetOtherParams,
+  cmdSetFloodScope,
+  cmdGetDefaultFloodScope,
+  decodeDefaultFloodScope,
   OUT_PATH_FLOOD,
   groupTextCiphertext,
   PayloadType,
@@ -193,6 +197,10 @@ export class MeshCoreClient implements RadioClient {
   private repeats = new RepeatFilter()
   /** Senders of recent channel texts, by packet key, so repeats are decrypted once. */
   private groupSenders = new Map<string, Promise<Pick<PacketRecord, 'channel' | 'name' | 'from'>>>()
+  /** Region keys by name: the radio's default scope and those the app uses. */
+  private scopeKeys = new Map<string, Promise<Uint8Array>>()
+  /** Scope of recent scoped packets, by packet key, so repeats are matched once. */
+  private packetScopes = new Map<string, Promise<string>>()
 
   constructor(
     private t: Transport,
@@ -249,7 +257,7 @@ export class MeshCoreClient implements RadioClient {
   }
 
   /** Sends one command and waits until its collector reports completion. Serialized. */
-  private request(payload: Uint8Array, collect: Collector, timeoutMs = 5000): Promise<void> {
+  private request(payload: Uint8Array, collect: Collector, timeoutMs = 5000, chained = true): Promise<void> {
     const run = () =>
       new Promise<void>((resolve, reject) => {
         const name = cmdName(payload[0])
@@ -269,8 +277,11 @@ export class MeshCoreClient implements RadioClient {
         this.sink.log({ dir: 'tx', kind: name, summary: hidden ? 'contents not logged' : '', bytes: hidden ?? payload })
         this.t.write(encodeFrame(payload)).catch((e) => this.finish(req, e))
       })
-    const p = this.chain.then(run, run)
-    this.chain = p.catch(() => {})
+    let p: Promise<void>
+    if (chained) {
+      p = this.chain.then(run, run)
+      this.chain = p.catch(() => {})
+    } else p = run()
     const type = TX_TYPES[payload[0]]
     if (type) {
       p.then(
@@ -314,16 +325,22 @@ export class MeshCoreClient implements RadioClient {
       name,
       dup: dup || undefined,
     }
-    if (pk.payloadType !== GRP_TXT) return void this.sink.packet?.(rec)
+    const code = pk.codes?.[0]
+    const scope = code ? this.scopeOf(pk.payloadType, pk.payload, code, `${code}:${key}`) : undefined
+    if (!code) rec.scope = null
+    if (pk.payloadType !== GRP_TXT && !scope) return void this.sink.packet?.(rec)
     // Channel text: the sender's name is inside, readable on our own channels. Repeats of the
     // packet reuse the first copy's result.
-    let sender = this.groupSenders.get(key)
-    if (!sender) {
-      sender = this.groupSender(pk.payload).catch(() => ({}))
-      this.groupSenders.set(key, sender)
-      if (this.groupSenders.size > 500) this.groupSenders.delete(this.groupSenders.keys().next().value!)
+    let sender: Promise<Pick<PacketRecord, 'channel' | 'name' | 'from'>> | undefined
+    if (pk.payloadType === GRP_TXT) {
+      sender = this.groupSenders.get(key)
+      if (!sender) {
+        sender = this.groupSender(pk.payload).catch(() => ({}))
+        this.groupSenders.set(key, sender)
+        if (this.groupSenders.size > 500) this.groupSenders.delete(this.groupSenders.keys().next().value!)
+      }
     }
-    void sender.then((s) => this.sink.packet?.({ ...rec, ...s }))
+    void Promise.all([sender, scope]).then(([s, sc]) => this.sink.packet?.({ ...rec, ...s, ...(sc === undefined ? {} : { scope: sc }) }))
   }
 
   /** Channel and claimed sender name of a channel text heard over the air, where one of our keys opens it. */
@@ -353,7 +370,7 @@ export class MeshCoreClient implements RadioClient {
   }
 
   /** Request whose single response frame must have the given code. */
-  private async expect(payload: Uint8Array, code: number, timeoutMs?: number): Promise<Uint8Array> {
+  private async expect(payload: Uint8Array, code: number, timeoutMs?: number, chained = true): Promise<Uint8Array> {
     let got: Uint8Array | undefined
     await this.request(
       payload,
@@ -363,8 +380,19 @@ export class MeshCoreClient implements RadioClient {
         return true
       },
       timeoutMs,
+      chained,
     )
     return got!
+  }
+
+  /**
+   * Runs `fn` with no other command in between; inside it, commands go through the `now`
+   * argument (an unchained expect).
+   */
+  private exclusive<T>(fn: (now: (payload: Uint8Array, code: number) => Promise<Uint8Array>) => Promise<T>): Promise<T> {
+    const p = this.chain.then(() => fn((payload, code) => this.expect(payload, code, undefined, false)))
+    this.chain = p.catch(() => {})
+    return p
   }
 
   // Handshake
@@ -405,6 +433,7 @@ export class MeshCoreClient implements RadioClient {
 
     this.sink.progress('Loading channels…')
     const channels = await this.loadChannels()
+    const floodScope = await this.loadFloodScope()
 
     const s = this.self
     const info: RadioInfo = {
@@ -422,6 +451,7 @@ export class MeshCoreClient implements RadioClient {
     this.sink.info(info, {
       maxChannels: this.device.maxChannels ?? 8,
       messageMaxBytes: 160 - utf8Encode(s.name).length - 2,
+      floodScope,
     })
     this.sink.node({
       id: info.nodeId,
@@ -439,6 +469,32 @@ export class MeshCoreClient implements RadioClient {
     this.ready = true
     this.sink.ready()
     void this.syncMessages(true)
+  }
+
+  /**
+   * Flood scope support (firmware ver 8+). Clears a scope override left by an earlier session
+   * (it lasts until the radio restarts), then reads the radio's default scope (v1.15+).
+   */
+  private async loadFloodScope() {
+    if ((this.device?.verCode ?? 0) < 8) return undefined
+    try {
+      await this.expect(cmdSetFloodScope(null), Resp.OK, 2000)
+    } catch {
+      return undefined
+    }
+    let radioDefault: string | null | undefined
+    try {
+      const d = decodeDefaultFloodScope(await this.expect(cmdGetDefaultFloodScope(), Resp.DEFAULT_FLOOD_SCOPE, 2000))
+      radioDefault = d ? cleanText(d.name).trim().replace(/^#/, '') || null : null
+      if (d && radioDefault) this.scopeKeys.set(radioDefault, Promise.resolve(d.key))
+    } catch {
+      /* older firmware: not known */
+    }
+    return { radioDefault, canUnscoped: (this.device?.verCode ?? 0) >= 12 }
+  }
+
+  setKnownScopes(names: string[]) {
+    for (const n of names) if (!this.scopeKeys.has(n)) this.scopeKeys.set(n, scopeKey(n))
   }
 
   private async loadContacts() {
@@ -607,7 +663,9 @@ export class MeshCoreClient implements RadioClient {
         }
         case Push.LOG_RX_DATA: {
           const r = decodeRxLog(f)
-          return `${PAYLOAD_TYPES[r.payloadType] ?? r.payloadType} snr ${r.snr} rssi ${r.rssi} ${r.raw.length} B`
+          const code = splitPacket(r.raw)?.codes?.[0]
+          const scope = code ? ` scope ${code.toString(16).padStart(4, '0')}` : ''
+          return `${PAYLOAD_TYPES[r.payloadType] ?? r.payloadType}${scope} snr ${r.snr} rssi ${r.rssi} ${r.raw.length} B`
         }
         case Push.ADVERT:
         case Push.PATH_UPDATED:
@@ -820,7 +878,21 @@ export class MeshCoreClient implements RadioClient {
       const secret = this.secrets.get(index)
       const echo = secret && { ct: await groupTextCiphertext(secret, ts, this.self?.name ?? '', text), localId, count: 0 }
       if (echo) this.echoes.push(echo)
-      await this.expect(cmdSendChannelText(index, text, ts), Resp.OK)
+      if (opts.scope === undefined) await this.expect(cmdSendChannelText(index, text, ts), Resp.OK)
+      else {
+        // The radio has one scope for all floods; set it for this message only.
+        const key = opts.scope === null ? 'none' : await this.scopeKey(opts.scope)
+        await this.exclusive(async (now) => {
+          await now(cmdSetFloodScope(key), Resp.OK)
+          try {
+            await now(cmdSendChannelText(index, text, ts), Resp.OK)
+          } finally {
+            await now(cmdSetFloodScope(null), Resp.OK).catch((e) =>
+              this.sink.log({ dir: 'error', kind: 'scope', summary: `scope not cleared: ${(e as Error).message}` }),
+            )
+          }
+        })
+      }
       this.sink.updateMessage(localId, { status: 'sent' })
       setTimeout(() => {
         if (echo) this.echoes = this.echoes.filter((e) => e !== echo)
@@ -840,6 +912,27 @@ export class MeshCoreClient implements RadioClient {
       Math.max(sent.timeoutMs * 2, REPEAT_WINDOW_MS),
     )
     this.acks.set(sent.tag, { localId, timer })
+  }
+
+  private scopeKey(name: string): Promise<Uint8Array> {
+    this.setKnownScopes([name])
+    return this.scopeKeys.get(name)!
+  }
+
+  /** Name of the region a scoped packet was sent in, or '' when none we know matches. */
+  private scopeOf(payloadType: number, payload: Uint8Array, code: number, key: string): Promise<string> {
+    let p = this.packetScopes.get(key)
+    if (!p) {
+      p = (async () => {
+        for (const [name, k] of this.scopeKeys) {
+          if ((await transportCode(await k, payloadType, payload)) === code) return name
+        }
+        return ''
+      })().catch(() => '')
+      this.packetScopes.set(key, p)
+      if (this.packetScopes.size > 500) this.packetScopes.delete(this.packetScopes.keys().next().value!)
+    }
+    return p
   }
 
   async action(action: string, id: string, ctx?: ActionContext) {

@@ -98,7 +98,7 @@ describe('MeshCore received packets', () => {
     const { records, hear } = mcSetup()
     hear(advert(OTHER, 'Hill', [0xaa, 0xbb]), -2.5, -101)
     expect(records).toEqual([
-      { ts: expect.any(Number), dir: 'rx', from: hex6(OTHER), type: 'advert', hops: 2, snr: -2.5, rssi: -101, name: 'Hill', dup: undefined },
+      { ts: expect.any(Number), dir: 'rx', from: hex6(OTHER), type: 'advert', hops: 2, snr: -2.5, rssi: -101, name: 'Hill', dup: undefined, scope: null },
     ])
   })
 

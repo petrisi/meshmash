@@ -23,6 +23,11 @@ export interface PacketRecord {
   dup?: boolean
   /** Held by the radio while no app was connected; received outside connected time. */
   queued?: boolean
+  /**
+   * MeshCore flood scope of a packet received: the region name where it is one we know, '' for
+   * another region, null for unscoped; undefined where not recorded (older records, Meshtastic).
+   */
+  scope?: string | null
 }
 
 export interface CoverageSpan {
@@ -309,4 +314,31 @@ export function byNode(recs: PacketRecord[], f: RecordFilter, since: number, sel
     .map(({ nameTs, ...n }) => ({ ...n, names: [...nameTs].sort((a, b) => b[1] - a[1]).map(([name]) => name) }))
     .sort((a, b) => b.count - a.count || b.last - a.last)
   return { nodes, unknown, sent, received }
+}
+
+export interface ScopeTotals {
+  /** Region name; '' for a region we do not know; null for unscoped. */
+  scope: string | null
+  count: number
+  last: number
+}
+
+/** MeshCore packets received since `since`, by flood scope, most first. */
+export function byScope(recs: PacketRecord[], f: RecordFilter, since: number): { rows: ScopeTotals[]; received: number; unrecorded: number } {
+  const map = new Map<string | null, ScopeTotals>()
+  let received = 0
+  let unrecorded = 0
+  for (const r of recs) {
+    if (r.dir !== 'rx' || r.ts < since || !keepRecord(r, f)) continue
+    received++
+    if (r.scope === undefined) {
+      unrecorded++
+      continue
+    }
+    let t = map.get(r.scope)
+    if (!t) map.set(r.scope, (t = { scope: r.scope, count: 0, last: 0 }))
+    t.count++
+    t.last = Math.max(t.last, r.ts)
+  }
+  return { rows: [...map.values()].sort((x, y) => y.count - x.count), received, unrecorded }
 }

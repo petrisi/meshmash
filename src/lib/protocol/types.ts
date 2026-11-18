@@ -81,6 +81,8 @@ export interface SendOptions {
    * from the app recently (PhoneAPI::wasSeenRecently), so the recipient may show it twice.
    */
   resend?: { senderTs?: number; attempt: number }
+  /** MeshCore channel text: region name, or null to send unscoped; undefined for the radio default. */
+  scope?: string | null
 }
 
 export interface RadioClient {
@@ -111,6 +113,8 @@ export interface RadioClient {
   importContact?(link: string): Promise<string>
   /** meshcore://<advert hex> for a contact or this radio; null where the radio has no advert stored. */
   exportContact?(nodeId: string): Promise<string | null>
+  /** MeshCore: scope names to recognise in packets heard, besides the radio's default. */
+  setKnownScopes?(names: string[]): void
   /** Send a CLI command to a server node we administer. */
   cli?(nodeId: string, text: string): Promise<void>
 }

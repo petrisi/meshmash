@@ -9,6 +9,8 @@
   import Badge from '../Badge.svelte'
   import Delivery from './Delivery.svelte'
   import HopPicker from './HopPicker.svelte'
+  import ScopePicker from './ScopePicker.svelte'
+  import { loadScope, type ScopeChoice, scopeNames } from '../../store/floodScopes'
 
   let { thread }: { thread: ThreadKey } = $props()
 
@@ -59,6 +61,23 @@
   function setHops(n: number) {
     override = n === defHops ? null : n
     if (radio) saveHopLimit(radio, thread, override)
+    input?.focus()
+  }
+  // MeshCore channel flood scope: the radio default unless chosen; each channel keeps its choice.
+  const scopeCaps = $derived(!isMt && !isDm ? app.session?.caps.floodScope : undefined)
+  let scope = $state<ScopeChoice | undefined>(undefined)
+  $effect(() => {
+    scope = radio ? loadScope(radio, thread) : undefined
+  })
+  const knownScopes = $derived.by(() => {
+    void scope
+    const names = radio ? scopeNames(radio) : []
+    const def = scopeCaps?.radioDefault
+    return def && !names.includes(def) ? [def, ...names] : names
+  })
+  function setScope(s: ScopeChoice | undefined) {
+    scope = s
+    app.setScope(thread, s)
     input?.focus()
   }
   /** Hop limit to send with; undefined for the radio default. */
@@ -172,7 +191,7 @@
   function submit() {
     const text = draft.trim()
     if (!text || bytes > maxBytes) return
-    app.send(thread, prefix + text, isMt ? (replyTo ?? undefined) : undefined, useHops())
+    app.send(thread, prefix + text, isMt ? (replyTo ?? undefined) : undefined, useHops(), scopeCaps ? scope : undefined)
     draft = ''
     replyTo = null
   }
@@ -267,7 +286,9 @@
             {/if}
           </span>
         </span>
-        {#if m.hopLimit !== undefined}
+        {#if m.scope !== undefined}
+          <span class="c mono muted" title={m.scope === null ? 'Sent unscoped' : `Sent with flood scope ${m.scope}`}>⌖{m.scope ?? '–'}</span>
+        {:else if m.hopLimit !== undefined}
           <span class="c mono muted" title="Sent with hop limit {m.hopLimit}">⤳{m.hopLimit}</span>
         {:else}
           <span class="c mono muted" class:relayed={relayOf(m)?.direct === false} title={m.hops === undefined ? undefined : hopsTitle(m)}>{hops(m)}</span>
@@ -309,6 +330,15 @@
             ? `${far.who} was heard directly`
             : `${far.who} was heard ${far.hops} hop${far.hops === 1 ? '' : 's'} away`}
         onpick={setHops}
+      />
+    {/if}
+    {#if scopeCaps}
+      <ScopePicker
+        value={scope}
+        radioDefault={scopeCaps.radioDefault}
+        canUnscoped={scopeCaps.canUnscoped}
+        known={knownScopes}
+        onpick={setScope}
       />
     {/if}
     <button class="primary" disabled={!draft.trim() || bytes > maxBytes} onclick={submit}>Send</button>

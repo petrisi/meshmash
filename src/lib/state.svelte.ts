@@ -35,6 +35,7 @@ import { deleteMessages, deletePackets, loadCoverage, loadMessages, loadNodeData
 import { loadDmList, saveDmList } from './store/dmList'
 import { PacketRecorder } from './store/packets'
 import { saveHopLimit } from './store/hopLimits'
+import { type ScopeChoice, saveScope, scopeNames } from './store/floodScopes'
 import { loadLastRead, saveLastRead } from './store/lastRead'
 import { candidatePorts, loadLastRadio, saveLastRadio } from './transport/lastRadio'
 import { rememberPortName } from './transport/portNames'
@@ -179,6 +180,7 @@ class AppState {
   connectDemo(protocol: Protocol) {
     const s = mockSession(protocol)
     this.session = { info: s.info, caps: capabilitiesFor(protocol), transport: 'Demo' }
+    if (protocol === 'meshcore') this.session.caps.floodScope = { radioDefault: null, canUnscoped: true }
     this.nodes = s.nodes
     this.channels = s.channels
     this.messages = s.messages
@@ -456,6 +458,7 @@ class AppState {
     return sanitizeSink({
       info: (info, caps) => {
         this.session = { info, caps: { ...capabilitiesFor(info.protocol), ...caps }, transport: t.label }
+        if (caps?.floodScope) this.#client?.setKnownScopes?.(scopeNames(info.nodeId))
         const proto = info.protocol === 'meshtastic' ? 'Meshtastic' : 'MeshCore'
         if (t instanceof SerialTransport) void rememberPortName(t.port, `${info.longName} · ${proto}`)
       },
@@ -768,15 +771,25 @@ class AppState {
       .catch((e) => this.#log({ dir: 'error', kind: 'react', summary: String(e) }))
   }
 
-  /** hopLimit: Meshtastic override of the radio's default for this message. */
-  send(thread: ThreadKey, text: string, replyTo?: Message, hopLimit?: number) {
+  /**
+   * hopLimit: Meshtastic override of the radio's default for this message. scope: MeshCore
+   * channel flood scope instead of the radio's default.
+   */
+  send(thread: ThreadKey, text: string, replyTo?: Message, hopLimit?: number, scope?: ScopeChoice) {
     const id = `local-${Date.now()}-${++localSeq}`
-    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0, replyTo: replyTo?.packetId, hopLimit }
+    const msg: Message = { id, thread, from: this.selfId, text, ts: Date.now(), status: 'pending', repeats: 0, replyTo: replyTo?.packetId, hopLimit, scope }
     // Demo: the packet id a Meshtastic radio would give it, so it can be replied to.
     if (this.#demo && this.protocol === 'meshtastic') msg.packetId = Math.floor(Math.random() * 2 ** 31) + 1
     this.messages.push(msg)
     this.markRead(thread)
-    this.#transmit(msg, { replyTo: replyTo?.packetId, hopLimit })
+    this.#transmit(msg, { replyTo: replyTo?.packetId, hopLimit, scope })
+  }
+
+  /** MeshCore: a channel's flood scope; undefined for the radio default. */
+  setScope(thread: ThreadKey, scope: ScopeChoice | undefined) {
+    if (!this.session) return
+    saveScope(this.session.info.nodeId, thread, scope)
+    if (scope) this.#client?.setKnownScopes?.([scope])
   }
 
   /** The radio is connected (or the demo), so a DM can be sent again. */
@@ -937,6 +950,7 @@ class AppState {
     }
     delete this.channelHeard[thread]
     saveHopLimit(this.session!.info.nodeId, thread, null)
+    saveScope(this.session!.info.nodeId, thread, undefined)
   }
 
   get canManageContacts() {
